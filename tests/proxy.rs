@@ -203,6 +203,8 @@ fn refuses_unscannable_bodies() {
     let form = post(p.port, "/openai/files", &[("content-type", "text/plain")], b"name=Ram Thapa");
     assert_eq!(form.0, 415);
     assert!(form.1.contains("parda_error"));
+    let ws = post(p.port, "/openai/responses", &[("upgrade", "websocket"), ("connection", "upgrade")], b"");
+    assert_eq!(ws.0, 426, "Codex falls back to HTTPS only on 426");
     assert!(seen.recv_timeout(Duration::from_millis(300)).is_err(), "nothing may reach the provider");
 }
 

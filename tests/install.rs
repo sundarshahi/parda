@@ -1,0 +1,75 @@
+//! `parda install` then `parda uninstall` in a throwaway home folder: every file parda touches comes
+//! back exactly as it was, and whatever the tools used before becomes parda's upstream.
+
+use serde_json::Value;
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+fn parda(home: &Path, cmd: &str) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_parda"))
+        .arg(cmd)
+        .env_clear()
+        .env("HOME", home)
+        .env("SHELL", "/bin/zsh")
+        .env("PATH", "/usr/bin:/bin")
+        .env("PARDA_NO_SERVICE", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{cmd}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[test]
+fn install_routes_everything_and_uninstall_restores_every_file() {
+    let home = std::env::temp_dir().join(format!("parda-home-{}", std::process::id()));
+    fs::remove_dir_all(&home).ok();
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    let files = [
+        (
+            ".zshrc",
+            "# >>> other proxy >>>\nexport ANTHROPIC_BASE_URL=http://127.0.0.1:8787\n# <<< other proxy <<<\nalias ll='ls -l'\n",
+        ),
+        (".zshenv", "export EDITOR=vim\n"),
+        (
+            ".claude/settings.json",
+            "{\n  \"env\": {\n    \"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:8787\"\n  },\n  \"model\": \"opus\"\n}\n",
+        ),
+        (".codex/config.toml", "model = \"gpt-5\"\n\n[profiles.fast]\nmodel = \"gpt-5-mini\"\n"),
+    ];
+    for (f, text) in files {
+        fs::write(home.join(f), text).unwrap();
+    }
+
+    let said = parda(&home, "install");
+    assert!(said.contains("Anthropic requests go on to http://127.0.0.1:8787"), "{said}");
+    assert!(said.contains("OpenAI requests go on to https://api.openai.com/v1"), "{said}");
+
+    let up: Value = serde_json::from_str(&fs::read_to_string(home.join(".parda/upstreams.json")).unwrap()).unwrap();
+    assert_eq!(up["anthropic"], "http://127.0.0.1:8787");
+    let settings: Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap()).unwrap();
+    assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:7390/anthropic");
+    assert!(
+        fs::read_to_string(home.join(".codex/config.toml"))
+            .unwrap()
+            .contains("openai_base_url = \"http://127.0.0.1:7390/openai\"")
+    );
+    let zshrc = fs::read_to_string(home.join(".zshrc")).unwrap();
+    assert!(zshrc.find("other proxy").unwrap() < zshrc.find(">>> parda >>>").unwrap(), "parda's block runs last");
+    assert!(
+        fs::read_to_string(home.join(".parda/env.sh"))
+            .unwrap()
+            .contains("ANTHROPIC_BASE_URL=\"http://127.0.0.1:7390/anthropic\"")
+    );
+    let key = fs::metadata(home.join(".parda/key")).unwrap();
+    assert_eq!(std::os::unix::fs::PermissionsExt::mode(&key.permissions()) & 0o777, 0o600);
+
+    parda(&home, "install"); // a second install changes nothing it shouldn't
+    parda(&home, "uninstall");
+    for (f, text) in files {
+        assert_eq!(fs::read_to_string(home.join(f)).unwrap(), text, "{f} not restored exactly");
+    }
+    fs::remove_dir_all(&home).ok();
+}

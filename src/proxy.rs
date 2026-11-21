@@ -16,6 +16,8 @@ use ureq::http;
 pub const PORT: u16 = 7390;
 const MAX_HEAD: usize = 64 << 10;
 const MAX_BODY: usize = 64 << 20;
+/// Where Codex sends requests when signed in with ChatGPT rather than an API key.
+const CHATGPT_CODEX: &str = "https://chatgpt.com/backend-api/codex";
 
 /// Headers that belong to one connection, not to the request, plus ones parda sets itself.
 const HOP: [&str; 11] = [
@@ -176,7 +178,9 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
         return error(out, 404, &format!("parda has no route for {}", req.target));
     };
     if req.header("upgrade").is_some() {
-        return error(out, 501, "parda can't inspect WebSocket traffic, so it doesn't forward it");
+        // 426 is the answer Codex expects before it falls back to plain HTTPS; anything else costs
+        // every session several seconds of retries.
+        return error(out, 426, "parda can't inspect WebSocket traffic; use HTTPS");
     }
     if req.header("content-encoding").is_some_and(|v| !v.eq_ignore_ascii_case("identity")) {
         return error(out, 415, "parda can't scan a compressed request body, so it wasn't sent");
@@ -194,7 +198,13 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
     };
     let mask_us = started.elapsed().as_micros() as u64;
     let rest = &req.target[route.prefix.len()..];
-    let url = format!("{}{}", route.upstream.trim_end_matches('/'), rest);
+    // Codex signed in with ChatGPT sends this header and talks to ChatGPT's backend instead of the API.
+    let upstream = if route.upstream == crate::setup::OPENAI_DEFAULT && req.header("chatgpt-account-id").is_some() {
+        CHATGPT_CODEX
+    } else {
+        &route.upstream
+    };
+    let url = format!("{}{}", upstream.trim_end_matches('/'), rest);
 
     let mut builder = http::Request::builder().method(req.method.as_str()).uri(&url);
     for (k, v) in &req.headers {
@@ -210,7 +220,7 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
     };
     let resp = match sent {
         Ok(Ok(r)) => r,
-        Ok(Err(e)) => return error(out, 502, &format!("parda could not reach {}: {e}", route.upstream)),
+        Ok(Err(e)) => return error(out, 502, &format!("parda could not reach {upstream}: {e}")),
         Err(e) => return error(out, 400, &format!("parda could not build the upstream request: {e}")),
     };
 
