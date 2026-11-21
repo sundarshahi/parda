@@ -148,7 +148,7 @@ fn read_request(r: &mut impl BufRead) -> io::Result<Option<Request>> {
                 }
                 break;
             }
-            if body.len() + n > MAX_BODY {
+            if n > MAX_BODY - body.len() {
                 return Err(io::Error::other("body too large"));
             }
             let at = body.len();
@@ -186,6 +186,13 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
         return error(out, 415, "parda can't scan a compressed request body, so it wasn't sent");
     }
 
+    // Query strings are forwarded as they are, so they must hold nothing parda would mask.
+    if let Some((_, query)) = req.target.split_once('?') {
+        if !crate::detect::scan(query).is_empty() {
+            return error(out, 400, "parda found sensitive data in the URL and didn't send the request");
+        }
+    }
+
     let started = Instant::now();
     let mut counts = Counts::new();
     let body = if req.body.is_empty() {
@@ -204,6 +211,7 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
     } else {
         &route.upstream
     };
+    let upstream_url = upstream.to_string();
     let url = format!("{}{}", upstream.trim_end_matches('/'), rest);
 
     let mut builder = http::Request::builder().method(req.method.as_str()).uri(&url);
@@ -249,7 +257,9 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
                 Ok(0) => break,
                 Ok(n) => n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
+                // Cut off upstream: drop the connection without the final chunk, so the tool sees an
+                // incomplete answer instead of a clean ending.
+                Err(e) => return Err(e),
             };
             chunk(out, &r.feed(&buf[..n]))?;
         }
@@ -259,7 +269,9 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
         restored = r.restored;
     } else {
         let mut data = Vec::new();
-        upstream.take(MAX_BODY as u64).read_to_end(&mut data).ok();
+        if let Err(e) = upstream.take(MAX_BODY as u64).read_to_end(&mut data) {
+            return error(out, 502, &format!("parda lost the connection to {upstream_url} mid-answer: {e}"));
+        }
         if !encoded {
             if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&data) {
                 body::restore_value(&state.vault, &mut v, &mut restored);

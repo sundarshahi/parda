@@ -203,9 +203,23 @@ fn refuses_unscannable_bodies() {
     let form = post(p.port, "/openai/files", &[("content-type", "text/plain")], b"name=Ram Thapa");
     assert_eq!(form.0, 415);
     assert!(form.1.contains("parda_error"));
+    let q = post(p.port, "/openai/responses?user=ram@example.com", &[("content-type", "application/json")], b"{}");
+    assert_eq!(q.0, 400, "data in the URL is refused");
     let ws = post(p.port, "/openai/responses", &[("upgrade", "websocket"), ("connection", "upgrade")], b"");
     assert_eq!(ws.0, 426, "Codex falls back to HTTPS only on 426");
     assert!(seen.recv_timeout(Duration::from_millis(300)).is_err(), "nothing may reach the provider");
+}
+
+#[test]
+fn a_hostile_chunk_size_drops_one_connection_not_the_proxy() {
+    let (url, _seen) = fake_upstream(echo_split);
+    let p = start(&url, "chunk");
+    let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+    s.write_all(b"POST /anthropic/v1/messages HTTP/1.1\r\nhost: x\r\ntransfer-encoding: chunked\r\n\r\n1\r\nA\r\nffffffffffffffff\r\n").unwrap();
+    let mut sink = Vec::new();
+    s.read_to_end(&mut sink).ok();
+    let (status, _) = post(p.port, "/anthropic/v1/messages", &[("content-type", "application/json")], b"{}");
+    assert_eq!(status, 200, "parda still answers");
 }
 
 #[test]

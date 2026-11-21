@@ -63,11 +63,14 @@ parda is free, open source (MIT OR Apache-2.0), with **no paid plan**.
    in Codex's `config.toml`. Whatever those pointed at before (the provider, or another proxy such
    as a compression proxy) becomes parda's upstream, so existing setups keep working.
 2. A request arrives. parda parses the JSON body and walks every string value except structural and
-   signed fields (`model`, ids, `signature`, `thinking`, encrypted reasoning, base64 media).
+   signed fields (`model`, ids, `signature`, `thinking`, encrypted reasoning, base64 media). Inside a
+   tool's `input` nothing is skipped: any key there can hold user data.
 3. Each string is scanned by the rules in one pass per rule. Overlapping finds keep the earliest, longest.
 4. Each find becomes a stand-in. The JSON is re-serialized (key order preserved) and sent upstream.
-5. The response streams back. parda restores stand-ins inside each event, holding back only the few
-   characters that could be the start of a split stand-in, and flushes them before the next unrelated event.
+5. The response streams back. parda restores stand-ins inside each event. When a delta ends with what
+   could be the start of a stand-in, that whole event is held until the next one: if it continues the
+   same field the characters move forward; if another field streams in between, they wait for their own
+   field; otherwise the event goes out unchanged. Events are never reordered or duplicated.
 
 ### Techniques — chosen per kind of data, automatically
 
@@ -90,8 +93,9 @@ the stand-in grows to 12.
 
 **The vault** (stand-in → real value) lives only in parda's memory, is never written to disk and is
 cleared when parda stops. After a restart, the next request re-masks the conversation history the
-client resends, which refills it with the same stand-ins. It is capped (100 000 entries, then cleared)
-so memory stays bounded.
+client resends, which refills it with the same stand-ins. It is capped at 100 000 entries; then a new
+table starts and the previous one is kept for lookups, so stand-ins handed out just before the switch
+still restore.
 
 **Thinking blocks** (Anthropic) and encrypted reasoning (OpenAI) are left exactly as the provider sent
 them, in both directions, because they are signed: changing a character breaks the next request.
@@ -105,9 +109,11 @@ break prompt caching. Its examples use `…` so they never look like real stand-
 
 ### What it detects (v0.1)
 
-- **Secrets:** provider key formats (Anthropic, OpenAI, AWS, GitHub, GitLab, Slack, Stripe, Google, npm,
-  SendGrid, Twilio…), JWTs, PEM private keys, bearer tokens, passwords in connection strings, and
-  values of secret-looking settings (`*_KEY=`, `"password": "…"`, `token: …`).
+- **Secrets:** provider key formats (Anthropic, OpenAI, AWS, GitHub, GitLab, Slack, Stripe, Google API and
+  OAuth, Hugging Face, PyPI, npm, SendGrid, Twilio…), JWTs, PEM private keys (also when cut off), bearer
+  and Basic auth, passwords in URLs and `curl -u`, and values of secret-looking settings (`*_PASSWORD=`,
+  `"password": "with spaces"`, `api_key: …`). Names are split into words: `password`/`secret`/`credential`
+  anywhere means any value; `key`/`token`/`auth` need a random-looking value without spaces.
 - **Personal data:** emails; phone numbers (international, Nepal mobile); card numbers (Luhn-checked);
   IBANs (checksum); US SSNs; public IPv4 addresses; labelled ID numbers (PAN, citizenship, passport,
   national ID, in English or Nepali).
@@ -122,6 +128,12 @@ a miss is a leak.
 
 - parda down → connection refused → the AI tool shows an error. Nothing is sent.
 - Request body that isn't JSON, or is compressed → refused with a clear error (it can't be scanned).
+  The body forwarded is always parda's re-written JSON, never the original bytes (a duplicate key that
+  parsing dropped can't ride along).
+- Sensitive data in the query string → refused (the URL is forwarded as it is). Headers are forwarded
+  as they are: they carry the user's API key to the provider.
+- Upstream cut off mid-answer → the connection is dropped (stream) or a `502` returned (JSON), never a
+  clean ending.
 - WebSocket upgrade → `426 Upgrade Required`, the answer Codex expects before falling back to HTTPS
   (any other refusal costs each session several seconds of retries).
 - Upstream unreachable → `502` with a parda error message.
@@ -153,7 +165,7 @@ Not covered: Cursor, Copilot inline completions, Gemini CLI with Google sign-in,
 
 | | Budget | Measured (Apple M2 Pro) |
 |---|---|---|
-| Release binary | < 5 MB (CI gate) | 2.0 MB |
+| Release binary | < 5 MB (CI gate) | 2.2 MB |
 | Idle memory | < 15 MB | 2.5 MB |
 | Rule scan, 150 KB Claude Code request | < 5 ms | 4 ms |
 | Whole masking step for that request | — | 6–8 ms |

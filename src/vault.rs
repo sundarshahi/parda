@@ -14,7 +14,8 @@ use std::sync::{Mutex, OnceLock};
 
 pub type Counts = BTreeMap<&'static str, u64>;
 
-/// Above this many entries the vault is cleared; the next request refills what it needs.
+/// Above this many entries the vault starts a new table; the previous one is kept for lookups, so
+/// stand-ins handed out just before the switch can still be restored.
 const MAX_ENTRIES: usize = 100_000;
 const EMAIL_DOMAIN: &str = "@parda.invalid";
 
@@ -28,14 +29,26 @@ pub fn token_re() -> &'static Regex {
     })
 }
 
+#[derive(Default)]
+struct Tables {
+    now: HashMap<String, String>,
+    previous: HashMap<String, String>,
+}
+
+impl Tables {
+    fn get(&self, t: &str) -> Option<&String> {
+        self.now.get(t).or_else(|| self.previous.get(t))
+    }
+}
+
 pub struct Vault {
     key: [u8; 32],
-    map: Mutex<HashMap<String, String>>,
+    map: Mutex<Tables>,
 }
 
 impl Vault {
     pub fn new(key: [u8; 32]) -> Self {
-        Vault { key, map: Mutex::new(HashMap::new()) }
+        Vault { key, map: Mutex::new(Tables::default()) }
     }
 
     /// The key lives in `dir/key` (mode 0600). Created from the OS random source on first use.
@@ -68,8 +81,8 @@ impl Vault {
         h.update(value.as_bytes());
         let hex = h.finalize().to_hex();
         let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-        if map.len() >= MAX_ENTRIES {
-            map.clear();
+        if map.now.len() >= MAX_ENTRIES {
+            map.previous = std::mem::take(&mut map.now);
         }
         for len in [8, 12, 16] {
             let t = match kind {
@@ -78,9 +91,8 @@ impl Vault {
             };
             match map.get(&t) {
                 Some(v) if v != value => continue, // collision: try a longer stand-in
-                Some(_) => return t,
-                None => {
-                    map.insert(t.clone(), value.to_string());
+                _ => {
+                    map.now.insert(t.clone(), value.to_string());
                     return t;
                 }
             }
@@ -185,6 +197,18 @@ mod tests {
     }
 
     #[test]
+    fn stand_ins_survive_the_table_switch() {
+        let v = Vault::new([4; 32]);
+        let t = v.stand_in(Kind::Person, "Ram Thapa");
+        {
+            let mut m = v.map.lock().unwrap();
+            m.previous = std::mem::take(&mut m.now);
+            m.now.insert("[ID_00000000]".into(), "x".into());
+        }
+        assert_eq!(v.restore(&t, false, &mut 0).as_deref(), Some("Ram Thapa"));
+    }
+
+    #[test]
     fn unknown_stand_ins_are_left_alone() {
         let v = Vault::new([1; 32]);
         assert_eq!(v.restore("hi [PERSON_00000000]", false, &mut 0), None);
@@ -201,7 +225,7 @@ mod tests {
     fn collision_gets_a_longer_stand_in() {
         let v = Vault::new([2; 32]);
         let t = v.stand_in(Kind::Person, "Ram Thapa");
-        v.map.lock().unwrap().insert(t.clone(), "someone else".into());
+        v.map.lock().unwrap().now.insert(t.clone(), "someone else".into());
         let longer = v.stand_in(Kind::Person, "Ram Thapa");
         assert_eq!(longer.len(), t.len() + 4);
     }

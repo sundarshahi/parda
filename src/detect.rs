@@ -74,7 +74,8 @@ fn rules() -> &'static [Rule] {
         use Kind::*;
         vec![
             // Secrets with a known shape.
-            rule(Secret, r"-----BEGIN[A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY(?: BLOCK)?-----", 0, any),
+            // A private key to its END line, or to the end of the text when cut off (head, a line limit).
+            rule(Secret, r"-----BEGIN[A-Z ]*PRIVATE KEY(?: BLOCK)?-----(?:[\s\S]*?-----END[A-Z ]*PRIVATE KEY(?: BLOCK)?-----|[\s\S]*\z)", 0, any),
             rule(Secret, r"\bsk-ant-[A-Za-z0-9_\-]{20,}", 0, any),
             rule(Secret, r"\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_\-]{20,}", 0, any),
             rule(Secret, r"\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b", 0, any),
@@ -88,13 +89,20 @@ fn rules() -> &'static [Rule] {
             rule(Secret, r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}", 0, any),
             rule(Secret, r"\bSK[0-9a-fA-F]{32}\b", 0, any),
             rule(Secret, r"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}", 0, any),
+            rule(Secret, r"\bhf_[A-Za-z0-9]{30,}|\bya29\.[0-9A-Za-z_\-]{20,}|\bpypi-AgE[A-Za-z0-9_\-]{50,}", 0, any),
             rule(Secret, r"(?i)\bbearer\s+([A-Za-z0-9\-._~+/]{20,}=*)", 1, any),
+            rule(Secret, r"(?i)\bbasic\s+([A-Za-z0-9+/]{12,}={0,2})", 1, any),
+            // curl -u user:password / --user user:password
+            rule(Secret, r"\bcurl\b[^\n]*?\s(?:-u|--user)[ =][\x22']?[^\s:\x22']+:([^\s\x22']{3,})", 1, not_placeholder),
             // Password inside a URL: scheme://user:PASSWORD@host
             rule(Secret, r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@]+:([^\s@/]+)@", 1, not_placeholder),
             // Settings whose name says secret: KEY=value lines (.env, shell, YAML) and quoted values
             // anywhere (JSON, code, config). The name and value are judged in `secret_setting`.
-            setting(r"(?m)^[ \t]*(?:export[ \t]+)?([A-Za-z][A-Za-z0-9_.\-]*)[ \t]*[=:][ \t]*[\x22']?([^\s\x22'#,;]{4,})"),
-            setting(r"[\x22']?([A-Za-z][A-Za-z0-9_.\-]*)[\x22']?\s*(?::|=|=>)\s*[\x22']([^\x22'\s]{4,})[\x22']"),
+            // (`#` starts a comment only after a space, so it can be part of a value.)
+            setting(r"(?m)^[ \t]*(?:export[ \t]+)?([A-Za-z][A-Za-z0-9_.\-]*)[ \t]*[=:][ \t]*[\x22']?([^\s\x22',;]{4,})"),
+            // Quoted values may hold spaces: "correct horse battery staple".
+            setting(r"[\x22']?([A-Za-z][A-Za-z0-9_.\-]*)[\x22']?\s*(?::|=|=>)\s*\x22([^\x22\n]{4,})\x22"),
+            setting(r"[\x22']?([A-Za-z][A-Za-z0-9_.\-]*)[\x22']?\s*(?::|=|=>)\s*'([^'\n]{4,})'"),
             // NAME=value mid-line: prose, `PGPASSWORD=… psql`, `curl -u`. Trailing punctuation isn't part of it.
             setting(r"(?:^|[\s;&|(])([A-Za-z][A-Za-z0-9_]*)=([^\s\x22'#,;&|)]{3,}[^\s\x22'#,;&|).:!?])"),
             // Personal data.
@@ -167,7 +175,7 @@ fn secret_setting(name: &str, value: &str) -> bool {
         && !looks_like_code(value);
     let random = (value.chars().any(|c| c.is_ascii_digit()) && value.chars().any(|c| c.is_ascii_alphabetic()))
         || (value.len() >= 16 && !value.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c == '-' || c == '.'));
-    plain && (strong || (weak && random))
+    plain && (strong || (weak && random && !value.contains(char::is_whitespace)))
 }
 
 fn looks_like_code(v: &str) -> bool {
@@ -301,6 +309,17 @@ mod tests {
         one("DATABASE_URL=postgres://app:Sup3rS3cret@db.internal:5432/app", Kind::Secret, "Sup3rS3cret");
         one("DB_PASSWORD=hunter22", Kind::Secret, "hunter22");
         one("run PGPASSWORD=s3cretpw psql -h db", Kind::Secret, "s3cretpw");
+        one(r#"DB_PASSWORD="my secret pass 2024""#, Kind::Secret, "my secret pass 2024");
+        one(r#"{"password": "correct horse battery staple"}"#, Kind::Secret, "correct horse battery staple");
+        one("DB_PASSWORD=abc#defgh", Kind::Secret, "abc#defgh");
+        one("DB_PASSWORD=Tr0ub4dor#3xyz", Kind::Secret, "Tr0ub4dor#3xyz");
+        one("Authorization: Basic dXNlcjpodW50ZXIycGFzcw==", Kind::Secret, "dXNlcjpodW50ZXIycGFzcw==");
+        one("curl -u admin:hunter2pass https://x", Kind::Secret, "hunter2pass");
+        // Built at run time so secret scanners don't mistake the fake for a real token.
+        let hf = ["hf", "_abcdefghijklmnopqrstuvwxyzABCDEFGH"].concat();
+        one(&format!("HF {hf}"), Kind::Secret, &hf);
+        let cut = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nAAAA";
+        one(&format!("head of the file:\n{cut}"), Kind::Secret, cut);
         one("the line DB_PASSWORD=Hunter2Hunter2. Then", Kind::Secret, "Hunter2Hunter2");
         one("export STRIPE_SECRET=abc123def456", Kind::Secret, "abc123def456");
         one(r#"{"password": "correct-horse-battery"}"#, Kind::Secret, "correct-horse-battery");
@@ -324,6 +343,9 @@ mod tests {
         none(r#""tokenizer": "cl100k_base""#);
         none("sort_key: created_at");
         none(r#""author": "Sundar""#);
+        none(r#""auth": "Basic login flow for the admin page""#);
+        none(r#"# DB_PASSWORD is set in the vault"#);
+        none("last=$(date -u +%Y-%m-%dT%H:%M:%SZ)");
     }
 
     #[test]

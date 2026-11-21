@@ -28,10 +28,10 @@
 
 <h2>Secrets</h2>
 <ul>
-<li>API keys with a known shape: Anthropic, OpenAI, AWS, GitHub, GitLab, Slack (tokens and webhooks), Stripe, Google, npm, SendGrid, Twilio.</li>
-<li>JWTs, bearer tokens, and private keys in PEM blocks.</li>
-<li>Passwords inside URLs: <code>postgres://app:<strong>this part</strong>@db</code>.</li>
-<li>Values of settings whose name says secret, in <code>.env</code> files, shell commands, YAML, JSON and code: <code>DB_PASSWORD=…</code>, <code>PGPASSWORD=… psql</code>, <code>"clientSecret": "…"</code>, <code>api_key: …</code>.</li>
+<li>API keys with a known shape: Anthropic, OpenAI, AWS, GitHub, GitLab, Slack (tokens and webhooks), Stripe, Google (API keys and OAuth tokens), Hugging Face, PyPI, npm, SendGrid, Twilio.</li>
+<li>JWTs, bearer tokens, Basic auth, and private keys in PEM blocks — even when the END line was cut off.</li>
+<li>Passwords inside URLs (<code>postgres://app:<strong>this part</strong>@db</code>) and in <code>curl -u user:<strong>this part</strong></code>.</li>
+<li>Values of settings whose name says secret, in <code>.env</code> files, shell commands, YAML, JSON and code: <code>DB_PASSWORD=…</code>, <code>PGPASSWORD=… psql</code>, <code>"clientSecret": "…"</code>, <code>api_key: …</code>. Quoted passwords may contain spaces.</li>
 </ul>
 <p>Settings named <em>key</em>, <em>token</em> or <em>auth</em> are only masked when the value looks random, so <code>max_tokens: 4096</code>, <code>primary_key: id</code> and <code>auth: true</code> are left alone. Names containing <em>password</em>, <em>secret</em> or <em>credential</em> are always masked. Code like <code>token = getToken()</code> and placeholders like <code>${API_KEY}</code> are left alone.</p>
 

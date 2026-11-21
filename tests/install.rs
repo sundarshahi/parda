@@ -41,6 +41,8 @@ fn install_routes_everything_and_uninstall_restores_every_file() {
     for (f, text) in files {
         fs::write(home.join(f), text).unwrap();
     }
+    let latin1 = b"export NAME='Jos\xe9'\n"; // not UTF-8: must be left exactly as it is
+    fs::write(home.join(".bash_profile"), latin1).unwrap();
 
     let said = parda(&home, "install");
     assert!(said.contains("Anthropic requests go on to http://127.0.0.1:8787"), "{said}");
@@ -71,5 +73,6 @@ fn install_routes_everything_and_uninstall_restores_every_file() {
     for (f, text) in files {
         assert_eq!(fs::read_to_string(home.join(f)).unwrap(), text, "{f} not restored exactly");
     }
+    assert_eq!(fs::read(home.join(".bash_profile")).unwrap(), latin1, "a file parda can't read is never touched");
     fs::remove_dir_all(&home).ok();
 }

@@ -16,3 +16,4 @@ First release.
 - `install` routes Claude Code, Codex, Aider and SDK apps with no settings; `uninstall` restores
   every file; `status`; `mask`.
 - Evidence log with kinds and counts, never values.
+- Install never overwrites a file it can't read; uninstall says what it couldn't put back.

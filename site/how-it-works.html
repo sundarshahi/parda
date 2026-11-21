@@ -71,6 +71,8 @@
 <li><strong>parda isn't running:</strong> your tool can't connect and shows an error. Nothing is sent.</li>
 <li><strong>The body isn't JSON, or is compressed:</strong> refused with a clear message, because parda can't check it.</li>
 <li><strong>A WebSocket connection:</strong> refused, so tools like Codex fall back to normal HTTPS, which parda can check.</li>
+<li><strong>Sensitive data in the URL itself:</strong> refused, because the address is forwarded as it is.</li>
+<li><strong>The answer is cut off upstream:</strong> your tool sees an incomplete answer or an error, never a clean ending.</li>
 <li><strong>The AI company or your gateway is unreachable:</strong> a clear "parda could not reach …" error.</li>
 </ul>
 
@@ -79,9 +81,9 @@
 <div class="table-scroll"><table>
 <thead><tr><th>What</th><th class="num">Measured</th></tr></thead>
 <tbody>
-<tr><td>Program size</td><td class="num">2.0 MB</td></tr>
+<tr><td>Program size</td><td class="num">2.2 MB</td></tr>
 <tr><td>Memory when idle</td><td class="num">2.5 MB</td></tr>
-<tr><td>Checking the text of a 150 KB Claude Code request</td><td class="num">4 ms</td></tr>
+<tr><td>Checking the text of a 150 KB Claude Code request</td><td class="num">4–5 ms</td></tr>
 <tr><td>Whole masking step for that request (read, check, write)</td><td class="num">6–8 ms</td></tr>
 <tr><td>CPU when no requests are running</td><td class="num">none</td></tr>
 </tbody></table></div>

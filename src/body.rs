@@ -6,17 +6,14 @@
 use crate::vault::{Counts, Vault};
 use serde_json::Value;
 
-/// Never masked or restored, nor anything inside them.
-const SKIP: [&str; 17] = [
+/// Structural fields: never masked or restored, nor anything inside them — except inside a tool's
+/// own input, where any key can hold user data.
+const SKIP: [&str; 14] = [
     "model",
     "id",
     "type",
     "role",
-    "signature",
-    "thinking",
     "encrypted_content",
-    "data",
-    "file_data",
     "tool_use_id",
     "tool_call_id",
     "call_id",
@@ -25,13 +22,17 @@ const SKIP: [&str; 17] = [
     "finish_reason",
     "object",
     "system_fingerprint",
+    "item_id",
 ];
 
 /// Fields that carry streamed text, where a stand-in can be split across two events.
 pub const TEXT_KEYS: [&str; 6] = ["text", "partial_json", "arguments", "content", "delta", "refusal"];
 
+/// Fields that tell streamed pieces of different blocks or calls apart; they become part of the path.
+const POSITION_KEYS: [&str; 4] = ["index", "output_index", "content_index", "item_id"];
+
 pub struct Leaf<'a> {
-    /// Where the string sits, e.g. `@0/delta/text`. `@n` is an object's own `index` field.
+    /// Where the string sits, e.g. `@index=0/delta/text`.
     pub path: &'a str,
     pub key: &'a str,
     /// The string is itself JSON source (tool-call arguments): restored values must be escaped.
@@ -39,10 +40,30 @@ pub struct Leaf<'a> {
 }
 
 pub fn visit(v: &mut Value, f: &mut dyn FnMut(&mut String, &Leaf)) {
-    walk(v, &mut String::new(), "", "", f);
+    walk(v, &mut String::new(), "", "", false, f);
 }
 
-fn walk(v: &mut Value, path: &mut String, key: &str, parent_type: &str, f: &mut dyn FnMut(&mut String, &Leaf)) {
+fn skipped(key: &str, parent_type: &str, in_tool_input: bool) -> bool {
+    if in_tool_input {
+        return false;
+    }
+    match key {
+        // signed by the provider: changing a character breaks the next request
+        "thinking" | "signature" => true,
+        // base64 media and redacted thinking; a plain-text document's `data` is scanned
+        "data" | "file_data" => matches!(parent_type, "base64" | "redacted_thinking") || key == "file_data",
+        _ => SKIP.contains(&key),
+    }
+}
+
+fn walk(
+    v: &mut Value,
+    path: &mut String,
+    key: &str,
+    parent_type: &str,
+    in_tool_input: bool,
+    f: &mut dyn FnMut(&mut String, &Leaf),
+) {
     match v {
         Value::String(s) => {
             let json_source =
@@ -53,30 +74,46 @@ fn walk(v: &mut Value, path: &mut String, key: &str, parent_type: &str, f: &mut 
             for (i, x) in a.iter_mut().enumerate() {
                 let len = path.len();
                 path.push_str(&format!("/{i}"));
-                walk(x, path, key, parent_type, f);
+                walk(x, path, key, parent_type, in_tool_input, f);
                 path.truncate(len);
             }
         }
         Value::Object(m) => {
             let ty = m.get("type").and_then(Value::as_str).unwrap_or("").to_string();
             let len = path.len();
-            if let Some(i) = m.get("index").and_then(Value::as_u64) {
-                path.push_str(&format!("@{i}"));
+            if !in_tool_input {
+                for p in POSITION_KEYS {
+                    match m.get(p) {
+                        Some(Value::Number(n)) => path.push_str(&format!("@{p}={n}")),
+                        Some(Value::String(s)) => path.push_str(&format!("@{p}={s}")),
+                        _ => {}
+                    }
+                }
             }
             for (k, x) in m.iter_mut() {
-                if SKIP.contains(&k.as_str()) {
+                if skipped(k, &ty, in_tool_input) {
                     continue;
                 }
+                let tool_input = in_tool_input || (k == "input" && ty.ends_with("tool_use"));
                 let l = path.len();
                 path.push('/');
                 path.push_str(k);
-                walk(x, path, k, &ty, f);
+                walk(x, path, k, &ty, tool_input, f);
                 path.truncate(l);
             }
             path.truncate(len);
         }
         _ => {}
     }
+}
+
+/// An inline file or image (`data:image/png;base64,…`): not text, never scanned.
+fn is_data_url(s: &str) -> bool {
+    s.strip_prefix("data:").and_then(|r| r.split_once(";base64,")).is_some_and(|(mime, b64)| {
+        mime.contains('/')
+            && mime.bytes().all(|c| c.is_ascii_alphanumeric() || b"/.+-".contains(&c))
+            && !b64.bytes().any(|c| c.is_ascii_whitespace())
+    })
 }
 
 /// Told to the model whenever a request carries stand-ins. Without it, models treat stand-ins as
@@ -119,18 +156,19 @@ pub fn mask_request(vault: &Vault, body: &[u8], counts: &mut Counts, anthropic: 
     let mut v: Value = serde_json::from_slice(body).map_err(|e| format!("the request body isn't JSON ({e})"))?;
     let mut changed = false;
     visit(&mut v, &mut |s, _| {
-        if s.starts_with("data:") {
-            return; // inline file or image
+        if is_data_url(s) {
+            return;
         }
         if let Some(m) = vault.mask(s, counts) {
             *s = m;
             changed = true;
         }
     });
-    if !changed {
-        return Ok(body.to_vec());
+    if changed {
+        add_note(&mut v, anthropic);
     }
-    add_note(&mut v, anthropic);
+    // Always the re-written body, never the original bytes: a duplicate key that parsing dropped
+    // must not ride along unscanned.
     serde_json::to_vec(&v).map_err(|e| e.to_string())
 }
 
@@ -176,6 +214,30 @@ mod tests {
         let out = mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), true).unwrap();
         let back: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(back["messages"][0]["content"][0], block);
+    }
+
+    #[test]
+    fn tool_input_and_text_documents_are_scanned_whatever_their_keys() {
+        let v = vault();
+        let body = json!({"messages": [{"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_1", "name": "write", "input": {"data": "AKIAIOSFODNN7EXAMPLE", "id": "ram@example.com", "type": "ram@example.com"}},
+            {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": "mail ram@example.com"}},
+            {"type": "text", "text": "data: AKIAIOSFODNN7EXAMPLE"},
+            {"type": "image", "source": {"type": "url", "url": "data:image/png;base64,QUtJQUlPU0ZPRE5ON0VYQU1QTEU="}}
+        ]}]});
+        let out =
+            String::from_utf8(mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), true).unwrap())
+                .unwrap();
+        assert!(!out.contains("AKIAIOSFODNN7EXAMPLE") && !out.contains("ram@example.com"), "{out}");
+        assert!(out.contains("\"toolu_1\"") && out.contains("QUtJQUlPU0ZPRE5ON0VYQU1QTEU="), "ids and base64 stay");
+    }
+
+    #[test]
+    fn duplicate_keys_never_go_out_unscanned() {
+        let out =
+            mask_request(&vault(), br#"{"system":"AKIAIOSFODNN7EXAMPLE","system":"hi"}"#, &mut Counts::new(), true)
+                .unwrap();
+        assert!(!String::from_utf8(out).unwrap().contains("AKIA"));
     }
 
     #[test]
