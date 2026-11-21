@@ -1,0 +1,37 @@
+# Given names that trigger a name match when followed by another capitalised word.
+# Leave out names that are also common words or product names (Will, Mark, Grace, Ruby, Claude, Jordan, Dev…).
+# English
+James John Robert Michael William David Richard Joseph Thomas Charles Christopher Daniel Matthew Anthony Donald
+Steven Paul Andrew Joshua Kenneth Kevin Brian George Timothy Ronald Edward Jason Jeffrey Ryan Jacob Gary Nicholas
+Eric Jonathan Stephen Larry Justin Scott Brandon Benjamin Samuel Gregory Alexander Patrick Dennis Jerry Tyler Aaron
+Adam Nathan Henry Zachary Douglas Peter Kyle Noah Ethan Jeremy Walter Keith Roger Terry Sean Gerald Carl Harold
+Dylan Arthur Lawrence Jesse Bryan Billy Bruce Gabriel Joe Logan Alan Albert Willie Elijah Wayne Randy Vincent Mason
+Roy Ralph Bobby Russell Bradley Philip Eugene Liam Oliver Lucas Bob Tom Tim Steve Mike Dave Jim Tony Ben Sam Nick
+Mary Patricia Jennifer Linda Elizabeth Barbara Susan Jessica Sarah Karen Lisa Nancy Betty Sandra Margaret Ashley
+Kimberly Emily Donna Michelle Carol Amanda Melissa Deborah Stephanie Dorothy Rebecca Sharon Laura Cynthia Amy
+Kathleen Angela Shirley Brenda Emma Anna Pamela Nicole Samantha Katherine Christine Helen Debra Rachel Carolyn Janet
+Maria Catherine Heather Diane Olivia Julie Joyce Kelly Christina Joan Evelyn Lauren Judith Megan Andrea Cheryl
+Hannah Jacqueline Martha Gloria Teresa Sara Madison Frances Kathryn Janice Jean Abigail Alice Judy Sophia Denise
+Marilyn Beverly Charlotte Natalie Diana Brittany Theresa Kayla Alexis Lori Marie Ava Mia Isabella Chloe Ella Zoe
+Sophie Lucy Kate Jane Anne Ann Emily Jenny Laura Megan Amelia Harry Jack Oscar Charlie Freddie Alfie Archie
+# Spanish, Portuguese, French, German, Slavic, Arabic, East Asian
+Jose Juan Carlos Luis Miguel Jorge Pedro Diego Javier Alejandro Fernando Ricardo Sofia Lucia Valentina Camila Gabriela
+Francisco Antonio Manuel Rafael Joao Paulo Ana Beatriz Pierre Francois Antoine Nicolas Camille Amelie Hans Klaus
+Stefan Jurgen Wolfgang Lars Sven Anders Ivan Dmitri Dmitry Sergei Sergey Olga Natasha Tatiana Andrei Mikhail Alexei
+Muhammad Mohammed Mohammad Mohamed Ahmed Ahmad Ali Omar Hassan Hussein Ibrahim Yusuf Abdul Abdullah Imran Aisha Ayesha
+Fatima Zainab Khadija Mustafa Hamza Bilal Tariq Hiroshi Kenji Takeshi Haruto Yuki Akira Satoshi Kazuki Minh Thanh
+# South Asian
+Rahul Priya Ankit Neha Vikram Aditya Rohit Anjali Deepika Sneha Raj Amitabh Arvind Rakesh Mukesh Lalit Nitin Vivek
+Pankaj Gaurav Varun Karan Arun Tarun Kunal Manish Pooja Swati Shweta Divya Kavya Meera Nisha Payal Ritu Shreya
+# Nepali (romanised)
+Ram Shyam Hari Krishna Gopal Bishnu Shiva Ganesh Rajesh Ramesh Suresh Dinesh Mahesh Naresh Umesh Prakash Bikash Bikas
+Deepak Dipak Sanjay Ajay Bijay Vijay Rabin Rabindra Sunil Anil Kamal Bimal Nirmal Sagar Sujan Sandeep Santosh Manoj
+Saroj Binod Pramod Prem Raju Rajan Ranjan Roshan Rohan Sabin Sachin Anish Ashish Aashish Amit Sumit Nabin Navin Pawan
+Pradeep Pradip Prabin Pravin Kiran Bishal Bibek Bipin Bijaya Dipesh Nirajan Niraj Suraj Sudip Sudeep Sushil Sundar
+Sunita Sita Gita Geeta Rita Anita Sarita Kabita Kavita Babita Sabita Samjhana Sangita Sushma Sushila Sharmila
+Nirmala Kamala Bimala Laxmi Lakshmi Parbati Parvati Radha Saraswati Durga Manisha Menuka Puja Asmita Smriti Srijana
+Sujata Pratima Rekha Renu Rojina Roshani Sabina Sapana Sarala Shanti Shova Sobha Usha Uma Yamuna Bina Binita Dilip
+Hemanta Ishwor Ishwar Janak Kishor Laxman Madhav Mohan Narayan Nabaraj Padam Purna Rajendra Ravi Rabi Surendra
+Tilak Yogesh Bhim Bhupendra Birendra Gyanendra Mahendra Dhruba Ashok Arjun Aayush Ayush Pratik Prashant Prasanna
+Rupesh Sanjeev Sanjib Shankar Sudarshan Upendra Abhishek Aakash Akash Anju Bibash Dipendra Jitendra Keshav Lokesh
+Nawaraj Pushpa Rajkumar Shiva Shristi Sristi Sunita Susmita Sushmita Tara Bandana Bhawana Binisha Elina Nisha Pabitra

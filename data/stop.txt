@@ -1,0 +1,4 @@
+# Words that may open a capitalised run but are never part of a name.
+The A An Dear Hi Hello Hey Mr Mrs Ms Miss Dr Prof Sir Madam Mister Shri Shree Er Adv Thanks Thank Regards From To Cc
+By For With And Or Of In On At Is Was Team Contact Name Customer Employee Manager Staff User Client Owner Author Signed
+श्री श्रीमती सुश्री श्रीमान् डा. डाक्टर र को का की ले लाई मा बाट सँग पनि हो छ नाम मेरो तपाईं उनको उहाँ हाम्रो

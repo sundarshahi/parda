@@ -1,0 +1,27 @@
+[package]
+name = "parda"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A curtain between your machine and every AI: masks secrets and personal data before AI coding agents send them, restores them in the answer. Local, no settings."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sundarshahi/parda"
+homepage = "https://sundarshahi.github.io/parda/"
+readme = "README.md"
+keywords = ["privacy", "pii", "redaction", "llm", "proxy"]
+categories = ["command-line-utilities", "development-tools", "network-programming"]
+exclude = ["/.github", "/docs"]
+
+[dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+blake3 = { version = "1", default-features = false, features = ["pure", "std"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

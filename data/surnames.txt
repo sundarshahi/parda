@@ -1,0 +1,24 @@
+# Surnames distinctive enough to mark the capitalised word(s) before them as a name.
+# Leave out surnames that are common English words (Smith, Brown, White, Young, King, Taylor, Cook…).
+# Nepali
+Shrestha Thapa Gurung Tamang Magar Limbu Sherpa Adhikari Bhattarai Poudel Paudel Pokharel Pokhrel Ghimire Dahal
+Koirala Regmi Neupane Acharya Bhandari Karki Khadka Basnet Bista Shahi Thakuri Maharjan Shakya Bajracharya Tuladhar
+Manandhar Pradhan Joshi Pandey Pant Upadhyay Upadhyaya Sharma Aryal Bhusal Dhakal Gautam Gyawali Kandel Lamichhane
+Oli Subedi Timilsina Tiwari Khanal Baral Banjade Bhatta Bohara Chaudhary Chaudhari Tharu Yadav Mahato Rai Lama Rana
+Malla Thakur Sah Shah Jha Mishra Chhetri Dangol Rajbhandari Amatya Bhujel Chapagain Devkota Dhungana Dhungel Gaire
+Gajurel Humagain Kafle Kharel Khatri Khatiwada Luitel Mainali Niraula Ojha Parajuli Phuyal Rijal Rimal Sapkota
+Sedhain Sigdel Silwal Sitaula Tamrakar Thapaliya Tripathi Wagle Bhatt Basyal Bastola Budhathoki Chalise Dawadi Dulal
+Ghising Hamal Kunwar Mahat Rawal Rokaya Saud Rokka Gharti Sunuwar Bishwokarma Biswakarma Pariyar Sunar Shrestha
+Karmacharya Shilpakar Nakarmi Prajapati Maskey Pradhananga Joshee Kayastha Lohani Marasini Pyakurel Sharma Simkhada
+# Indian, Pakistani, Bangladeshi
+Patel Singh Kumar Gupta Agarwal Aggarwal Reddy Iyer Nair Menon Rao Mehta Desai Chopra Kapoor Malhotra Banerjee
+Chatterjee Mukherjee Bose Khan Hussain Siddiqui Qureshi Chowdhury Chaudhry Verma Srivastava Saxena Bhatia Sethi
+# Western
+Johnson Williams Jones Garcia Davis Rodriguez Martinez Hernandez Lopez Gonzalez Wilson Anderson Jackson Perez Thompson
+Harris Sanchez Ramirez Lewis Robinson Nguyen Flores Nelson Mitchell Campbell Roberts Carter Phillips Evans Torres
+Collins Edwards Stewart Morris Murphy Rogers Morgan Peterson Bailey Richardson Watson Brooks Bennett Mendoza Ruiz
+Hughes Alvarez Castillo Sanders Myers Ross Foster Jimenez Powell Jenkins Perry Russell Sullivan Henderson Coleman
+Simmons Patterson Reynolds Hamilton Graham Gonzales Fernandez Gomez Diaz Romero Gutierrez Morales Ortiz Vasquez
+Wang Zhang Liu Chen Yang Huang Zhao Zhou Tanaka Suzuki Takahashi Watanabe Yamamoto Nakamura Kobayashi Sato Kim Park
+Mueller Schmidt Schneider Fischer Weber Wagner Becker Ivanov Smirnov Petrov Silva Santos Oliveira Souza Pereira
+Ferreira Almeida Rossi Russo Esposito Bianchi Romano Dubois Moreau Laurent Lefebvre O'Connor Kowalski Nowak
