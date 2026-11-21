@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install · parda</title>
+<meta name="description" content="Install parda on macOS or Linux with one command. What it changes on your machine, how to check it&#x27;s working, and how to remove it cleanly.">
+<link rel="canonical" href="https://sundarshahi.github.io/parda/install.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta name="theme-color" content="#1f6f78">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="parda">
+<meta property="og:title" content="Install · parda">
+<meta property="og:description" content="Install parda on macOS or Linux with one command. What it changes on your machine, how to check it&#x27;s working, and how to remove it cleanly.">
+<meta property="og:url" content="https://sundarshahi.github.io/parda/install.html">
+<meta property="og:image" content="https://sundarshahi.github.io/parda/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap"><a class="brand" href="./"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="3" width="28" height="3" rx="1.5" fill="currentColor"/><path d="M5 6h10v20c-3-1.5-6.5-1.5-10 0z" fill="currentColor"/><path d="M17 6h10v20c-3.5-1.5-7-1.5-10 0z" fill="currentColor" opacity=".55"/></svg>parda</a><nav aria-label="Main"><a href="install.html" aria-current="page">Install</a><a href="how-it-works.html">How it works</a><a href="what-it-masks.html">What it masks</a><a href="tools.html">Supported tools</a><a href="compliance.html">Compliance</a><a href="https://github.com/sundarshahi/parda">GitHub</a></nav></div></header>
+<main id="main"><div class="wrap doc"><aside><h2>Docs</h2><nav aria-label="Docs"><a href="install.html" aria-current="page">Install</a><a href="how-it-works.html">How it works</a><a href="what-it-masks.html">What it masks</a><a href="tools.html">Supported tools</a><a href="security.html">Security</a><a href="compliance.html">For compliance teams</a><a href="faq.html">FAQ</a></nav></aside><article>
+<h1>Install parda</h1>
+<p class="lede">One command. No settings. It takes effect in new terminals and restarted AI tools.</p>
+<h2>macOS and Linux</h2>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/sundarshahi/parda/main/install.sh | sh</code></pre>
+<p>The script downloads the release for your machine from GitHub, checks its SHA-256 checksum, and runs <code>parda install</code>. Windows isn't supported yet; WSL 2 works as Linux.</p>
+<h3>From source</h3>
+<pre><code>cargo install --git https://github.com/sundarshahi/parda
+parda install</code></pre>
+<p>Needs Rust 1.85 or newer.</p>
+
+<h2>Check it's working</h2>
+<p>Open a new terminal, then:</p>
+<pre><code>parda status</code></pre>
+<pre><code>● parda is running on http://127.0.0.1:7390
+  http://127.0.0.1:7390/anthropic → https://api.anthropic.com
+  http://127.0.0.1:7390/openai → https://api.openai.com/v1
+  today (2026-11-21 UTC): 42 requests, masked 3 EMAIL, 1 PERSON, 2 SECRET
+  log: /Users/you/.parda/log.jsonl</code></pre>
+<p>To see masking without any AI tool, pipe text through it:</p>
+<pre><code>echo "Ram Bahadur Thapa, ram@example.com, key sk-ant-api03-abcdefghijklmnopqrstu" | parda mask</code></pre>
+<pre><code>[PERSON_924d28c3], email_a898b1e7@parda.invalid, key [SECRET_11e5e743]
+parda: masked 1 EMAIL, 1 PERSON, 1 SECRET</code></pre>
+<p class="muted">Your stand-ins will differ: they are made with a key unique to your machine.</p>
+
+<h2>What install changes</h2>
+<p>Every change is marked so <code>parda uninstall</code> can remove it exactly.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Where</th><th>What</th></tr></thead>
+<tbody>
+<tr><td><code>~/.parda/</code></td><td>The program, your private key (<code>key</code>, readable only by you), where each route goes (<code>upstreams.json</code>) and the evidence log.</td></tr>
+<tr><td><code>~/.zshenv</code>, <code>~/.zshrc</code>, <code>~/.bashrc</code>, <code>~/.bash_profile</code>, fish <code>conf.d</code></td><td>A marked block that sets <code>ANTHROPIC_BASE_URL</code>, <code>OPENAI_BASE_URL</code>, <code>OPENAI_API_BASE</code> and <code>ANTHROPIC_API_BASE</code> to parda.</td></tr>
+<tr><td><code>~/.claude/settings.json</code></td><td><code>env.ANTHROPIC_BASE_URL</code>, because Claude Code's own settings win over the shell. The old value is saved and becomes parda's upstream.</td></tr>
+<tr><td><code>~/.codex/config.toml</code></td><td>A marked <code>openai_base_url</code> line at the top. An existing one is saved and becomes the upstream.</td></tr>
+<tr><td>Login service</td><td>A LaunchAgent (macOS) or systemd user service (Linux) that starts parda at login and restarts it if it stops.</td></tr>
+</tbody></table></div>
+<p>If one of those already pointed somewhere other than the AI company (another proxy, a company gateway), parda keeps sending requests on to it. Nothing you had stops working.</p>
+
+<h2>Update</h2>
+<p>Run the install command again. Your key, and so your stand-ins, stay the same.</p>
+
+<h2>Uninstall</h2>
+<pre><code>parda uninstall</code></pre>
+<p>This stops the service and puts every file above back the way it was. Your key and log stay in <code>~/.parda</code>; delete the folder to remove them too. Restart your AI tools afterwards: until then they still point at parda and show a connection error.</p>
+</article></div></main>
+<footer class="foot"><div class="wrap"><span>parda is free and open source (MIT or Apache-2.0). No paid plan, no accounts, no telemetry.</span><span><a href="https://github.com/sundarshahi/parda">Source</a> · <a href="https://github.com/sundarshahi/parda/blob/main/CONTRIBUTING.md">Contribute</a> · <a href="security.html">Report a security issue</a></span></div></footer>
+</body>
+</html>

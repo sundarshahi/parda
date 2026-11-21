@@ -1,0 +1,29 @@
+name: Missed or false find
+description: parda didn't mask something it should have, or masked something it shouldn't.
+labels: [detection]
+body:
+  - type: markdown
+    attributes:
+      value: "**Use made-up data only.** Never paste a real key, password, name or ID — replace it with a fake one of the same shape."
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Which way?
+      options:
+        - Missed (should have been masked)
+        - False find (shouldn't have been masked)
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: A made-up example that shows it
+      description: The smallest text that reproduces it. You can check with `echo "…" | parda mask`.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: parda version
+      placeholder: "parda 0.1.0"

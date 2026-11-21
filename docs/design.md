@@ -1,8 +1,3 @@
----
-title: Design
-description: How parda is built — the goals, the trade-offs, and why each technique was chosen.
----
-
 # parda — design
 
 *Parda* (पर्दा) is Nepali for curtain. parda is a curtain between your machine and every AI service:
@@ -63,8 +58,9 @@ parda is free, open source (MIT OR Apache-2.0), with **no paid plan**.
    real data            mask ▸ vault ▸ restore             sees stand-ins only
 ```
 
-1. `parda install` points `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL` at parda (shell startup files and
-   Claude Code's `settings.json`). Whatever those pointed at before (the provider, or another proxy such
+1. `parda install` points `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL` (and Aider's `*_API_BASE`) at parda in
+   shell startup files, `env.ANTHROPIC_BASE_URL` in Claude Code's `settings.json`, and `openai_base_url`
+   in Codex's `config.toml`. Whatever those pointed at before (the provider, or another proxy such
    as a compression proxy) becomes parda's upstream, so existing setups keep working.
 2. A request arrives. parda parses the JSON body and walks every string value except structural and
    signed fields (`model`, ids, `signature`, `thinking`, encrypted reasoning, base64 media).
@@ -101,6 +97,12 @@ so memory stays bounded.
 them, in both directions, because they are signed: changing a character breaks the next request.
 They may show stand-ins to the user; they never contain real values from us.
 
+**Telling the model.** In testing, Claude refused to repeat stand-ins, treating them as redactions.
+When a request carries stand-ins, parda appends one short note to the system instructions (Anthropic
+`system`, OpenAI `instructions` or a system message): they are placeholders for values the user
+already has, to be used exactly as written. The note is identical on every request, so it doesn't
+break prompt caching. Its examples use `…` so they never look like real stand-ins.
+
 ### What it detects (v0.1)
 
 - **Secrets:** provider key formats (Anthropic, OpenAI, AWS, GitHub, GitLab, Slack, Stripe, Google, npm,
@@ -120,7 +122,8 @@ a miss is a leak.
 
 - parda down → connection refused → the AI tool shows an error. Nothing is sent.
 - Request body that isn't JSON, or is compressed → refused with a clear error (it can't be scanned).
-- WebSocket upgrade → refused.
+- WebSocket upgrade → `426 Upgrade Required`, the answer Codex expects before falling back to HTTPS
+  (any other refusal costs each session several seconds of retries).
 - Upstream unreachable → `502` with a parda error message.
 
 ### The log
@@ -140,17 +143,23 @@ Never values. Rotated at 10 MB (one old file kept). `parda status` summarises it
 
 ## Supported tools (v0.1)
 
-Works through a base URL: Claude Code (CLI and IDE extensions), Codex CLI (API-key sign-in), Aider,
-anything using the Anthropic or OpenAI SDKs that honours `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`.
+Works through a base URL: Claude Code (CLI and IDE extensions; tested end to end), Codex CLI (config
+file; ChatGPT sign-in is recognised by its `chatgpt-account-id` header and sent to ChatGPT's backend —
+untested), Aider, anything using the Anthropic or OpenAI SDKs that honours `ANTHROPIC_BASE_URL` /
+`OPENAI_BASE_URL`.
 Not covered: Cursor, Copilot inline completions, Gemini CLI with Google sign-in, desktop chat apps.
 
 ## Weight budget (checked in CI)
 
-| | Budget |
-|---|---|
-| Release binary | < 5 MB |
-| Idle memory | < 15 MB |
-| Added delay per request | measured and published, target < 5 ms for typical requests |
+| | Budget | Measured (Apple M2 Pro) |
+|---|---|---|
+| Release binary | < 5 MB (CI gate) | 2.0 MB |
+| Idle memory | < 15 MB | 2.5 MB |
+| Rule scan, 150 KB Claude Code request | < 5 ms | 4 ms |
+| Whole masking step for that request | — | 6–8 ms |
+
+Unicode `\b` / `\d` made some rules ~100× slower (150 ms total); rules are ASCII-only unless they need
+another script.
 
 ## Left to the builder
 

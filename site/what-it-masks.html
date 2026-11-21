@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What it masks · parda</title>
+<meta name="description" content="The secrets and personal data parda detects — API keys, passwords, emails, phones, cards, IBANs, ID numbers, English and Nepali names — and its known limits.">
+<link rel="canonical" href="https://sundarshahi.github.io/parda/what-it-masks.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta name="theme-color" content="#1f6f78">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="parda">
+<meta property="og:title" content="What it masks · parda">
+<meta property="og:description" content="The secrets and personal data parda detects — API keys, passwords, emails, phones, cards, IBANs, ID numbers, English and Nepali names — and its known limits.">
+<meta property="og:url" content="https://sundarshahi.github.io/parda/what-it-masks.html">
+<meta property="og:image" content="https://sundarshahi.github.io/parda/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap"><a class="brand" href="./"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="3" width="28" height="3" rx="1.5" fill="currentColor"/><path d="M5 6h10v20c-3-1.5-6.5-1.5-10 0z" fill="currentColor"/><path d="M17 6h10v20c-3.5-1.5-7-1.5-10 0z" fill="currentColor" opacity=".55"/></svg>parda</a><nav aria-label="Main"><a href="install.html">Install</a><a href="how-it-works.html">How it works</a><a href="what-it-masks.html" aria-current="page">What it masks</a><a href="tools.html">Supported tools</a><a href="compliance.html">Compliance</a><a href="https://github.com/sundarshahi/parda">GitHub</a></nav></div></header>
+<main id="main"><div class="wrap doc"><aside><h2>Docs</h2><nav aria-label="Docs"><a href="install.html">Install</a><a href="how-it-works.html">How it works</a><a href="what-it-masks.html" aria-current="page">What it masks</a><a href="tools.html">Supported tools</a><a href="security.html">Security</a><a href="compliance.html">For compliance teams</a><a href="faq.html">FAQ</a></nav></aside><article>
+<h1>What parda masks</h1>
+<p class="lede">Rules, not guesswork. When a rule is unsure, it masks: a false find costs the AI a little context and is restored for you anyway; a miss is a leak.</p>
+
+<h2>Secrets</h2>
+<ul>
+<li>API keys with a known shape: Anthropic, OpenAI, AWS, GitHub, GitLab, Slack (tokens and webhooks), Stripe, Google, npm, SendGrid, Twilio.</li>
+<li>JWTs, bearer tokens, and private keys in PEM blocks.</li>
+<li>Passwords inside URLs: <code>postgres://app:<strong>this part</strong>@db</code>.</li>
+<li>Values of settings whose name says secret, in <code>.env</code> files, shell commands, YAML, JSON and code: <code>DB_PASSWORD=…</code>, <code>PGPASSWORD=… psql</code>, <code>"clientSecret": "…"</code>, <code>api_key: …</code>.</li>
+</ul>
+<p>Settings named <em>key</em>, <em>token</em> or <em>auth</em> are only masked when the value looks random, so <code>max_tokens: 4096</code>, <code>primary_key: id</code> and <code>auth: true</code> are left alone. Names containing <em>password</em>, <em>secret</em> or <em>credential</em> are always masked. Code like <code>token = getToken()</code> and placeholders like <code>${API_KEY}</code> are left alone.</p>
+
+<h2>Personal data</h2>
+<div class="table-scroll"><table>
+<thead><tr><th>Kind</th><th>Examples</th><th>Checks</th></tr></thead>
+<tbody>
+<tr><td>Email</td><td><code>ram.thapa@example.com.np</code></td><td>—</td></tr>
+<tr><td>Phone</td><td><code>+977 9812345678</code>, <code>9841234567</code>, <code>(415) 555-0100</code>, <code>01-4567890</code></td><td>8–15 digits for international numbers</td></tr>
+<tr><td>Card number</td><td><code>4111 1111 1111 1111</code></td><td>Luhn checksum</td></tr>
+<tr><td>IBAN</td><td><code>GB82 WEST 1234 5698 7654 32</code></td><td>mod-97 checksum</td></tr>
+<tr><td>US SSN</td><td><code>123-45-6789</code></td><td>Invalid ranges skipped</td></tr>
+<tr><td>Public IP address</td><td><code>8.8.8.8</code></td><td>Private, loopback and version-like numbers skipped</td></tr>
+<tr><td>ID numbers next to a label</td><td><code>PAN No: 123456789</code>, <code>नागरिकता नं. २७-०१-७१-०५६७८</code>, passport, national ID, Aadhaar, tax ID, employee ID</td><td>English or Nepali label; ASCII or Devanagari digits</td></tr>
+</tbody></table></div>
+
+<h2>Names</h2>
+<p>A name is two or more words. parda uses lists of given names, middle names and surnames (English, South Asian, Nepali and others) to decide:</p>
+<ul>
+<li><strong>English script:</strong> capitalised words that start with a known given name (<em>John Doe</em>) or end in a distinctive surname (<em>Nirvik Shrestha</em>, <em>Priya Patel</em>). Titles like <em>Dr</em> or <em>Mr</em> stay outside the mask.</li>
+<li><strong>Devanagari:</strong> a known surname with the word before it (<em>सीता शर्मा</em>, <em>राम बहादुर थापा</em>), or a known given name followed by middle names (<em>हरि प्रसाद</em>). Postpositions written onto the name are included: <em>अधिकारीले</em>.</li>
+</ul>
+
+<h2>Known limits</h2>
+<p>Better to know them than to discover them:</p>
+<ul>
+<li><strong>Single-word names</strong> ("ask Sita") and <strong>lower-case names</strong> are not masked. Too many ordinary words would be caught in code.</li>
+<li><strong>Names not on the lists</strong>, where neither the first nor the last word is known, are missed.</li>
+<li><strong>Addresses, dates of birth and free-text descriptions</strong> of a person are not detected.</li>
+<li><strong>Images, PDFs and audio</strong> inside a request are passed through without being checked.</li>
+<li>Some ordinary words that are also surnames (for example अधिकारी, "officer") are masked when they follow another word. That's the "when unsure, mask" rule: the AI sees a stand-in and your answer has the real word back.</li>
+</ul>
+<p>Found a miss or a false find? <a href="https://github.com/sundarshahi/parda/issues/new?template=detection.yml">Report it</a> with a made-up example — never paste the real data.</p>
+</article></div></main>
+<footer class="foot"><div class="wrap"><span>parda is free and open source (MIT or Apache-2.0). No paid plan, no accounts, no telemetry.</span><span><a href="https://github.com/sundarshahi/parda">Source</a> · <a href="https://github.com/sundarshahi/parda/blob/main/CONTRIBUTING.md">Contribute</a> · <a href="security.html">Report a security issue</a></span></div></footer>
+</body>
+</html>

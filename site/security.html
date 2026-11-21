@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security · parda</title>
+<meta name="description" content="parda&#x27;s threat model: what it protects against, what it doesn&#x27;t, where your data lives, and how to report a vulnerability.">
+<link rel="canonical" href="https://sundarshahi.github.io/parda/security.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta name="theme-color" content="#1f6f78">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="parda">
+<meta property="og:title" content="Security · parda">
+<meta property="og:description" content="parda&#x27;s threat model: what it protects against, what it doesn&#x27;t, where your data lives, and how to report a vulnerability.">
+<meta property="og:url" content="https://sundarshahi.github.io/parda/security.html">
+<meta property="og:image" content="https://sundarshahi.github.io/parda/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap"><a class="brand" href="./"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="3" width="28" height="3" rx="1.5" fill="currentColor"/><path d="M5 6h10v20c-3-1.5-6.5-1.5-10 0z" fill="currentColor"/><path d="M17 6h10v20c-3.5-1.5-7-1.5-10 0z" fill="currentColor" opacity=".55"/></svg>parda</a><nav aria-label="Main"><a href="install.html">Install</a><a href="how-it-works.html">How it works</a><a href="what-it-masks.html">What it masks</a><a href="tools.html">Supported tools</a><a href="compliance.html">Compliance</a><a href="https://github.com/sundarshahi/parda">GitHub</a></nav></div></header>
+<main id="main"><div class="wrap doc"><aside><h2>Docs</h2><nav aria-label="Docs"><a href="install.html">Install</a><a href="how-it-works.html">How it works</a><a href="what-it-masks.html">What it masks</a><a href="tools.html">Supported tools</a><a href="security.html" aria-current="page">Security</a><a href="compliance.html">For compliance teams</a><a href="faq.html">FAQ</a></nav></aside><article>
+<h1>Security</h1>
+<p class="lede">What parda protects against, what it doesn't, and what it can touch on your machine.</p>
+
+<h2>What it protects against</h2>
+<ul>
+<li>Secrets and personal data in your prompts, files, logs and tool output reaching an AI company or a proxy in between.</li>
+<li>Those values being stored, logged, used for training or exposed in a breach on the AI company's side — they never had them.</li>
+</ul>
+
+<h2>What it doesn't protect against</h2>
+<ul>
+<li>Data parda's rules don't recognise. See <a href="what-it-masks.html">known limits</a>.</li>
+<li>Images, PDFs and audio sent inside requests.</li>
+<li>Tools that don't route through parda (see <a href="tools.html">Supported tools</a>), or a tool you point elsewhere yourself.</li>
+<li>Someone who can already run programs as you on your machine. They could read your files directly.</li>
+<li>Telemetry a tool sends to its own maker, separately from its AI requests.</li>
+</ul>
+
+<h2>Where your data lives</h2>
+<div class="table-scroll"><table>
+<thead><tr><th>What</th><th>Where</th><th>Protection</th></tr></thead>
+<tbody>
+<tr><td>Real values (the vault)</td><td>parda's memory only</td><td>Never written to disk; gone when parda stops</td></tr>
+<tr><td>Stand-in key</td><td><code>~/.parda/key</code></td><td>Mode 0600; never sent anywhere</td></tr>
+<tr><td>Evidence log</td><td><code>~/.parda/log.jsonl</code></td><td>Mode 0600; kinds and counts only, never values</td></tr>
+</tbody></table></div>
+
+<h2>What parda can do on your machine</h2>
+<ul>
+<li>Runs as your user. Never asks for root.</li>
+<li>Listens on <code>127.0.0.1</code> only — not reachable from other machines.</li>
+<li>Makes no network connections of its own: it only forwards the requests your tools make.</li>
+<li>Writes the files listed on the <a href="install.html">install page</a>, each marked so uninstall can remove it.</li>
+<li><code>install.sh</code> downloads a release from GitHub and checks its SHA-256 checksum before running it.</li>
+</ul>
+
+<h2>Report a vulnerability</h2>
+<p>Please report privately: on GitHub, open the repository's <a href="https://github.com/sundarshahi/parda/security/advisories/new">Security tab → Report a vulnerability</a>. Don't open a public issue. You'll get a reply within a week, and a fix or a plan within 30 days.</p>
+</article></div></main>
+<footer class="foot"><div class="wrap"><span>parda is free and open source (MIT or Apache-2.0). No paid plan, no accounts, no telemetry.</span><span><a href="https://github.com/sundarshahi/parda">Source</a> · <a href="https://github.com/sundarshahi/parda/blob/main/CONTRIBUTING.md">Contribute</a> · <a href="security.html">Report a security issue</a></span></div></footer>
+</body>
+</html>

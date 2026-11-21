@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How it works · parda</title>
+<meta name="description" content="How parda masks secrets and personal data before AI requests leave your machine: tokenization, keyed pseudonyms, an in-memory vault, and restoring values in streamed answers.">
+<link rel="canonical" href="https://sundarshahi.github.io/parda/how-it-works.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta name="theme-color" content="#1f6f78">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="parda">
+<meta property="og:title" content="How it works · parda">
+<meta property="og:description" content="How parda masks secrets and personal data before AI requests leave your machine: tokenization, keyed pseudonyms, an in-memory vault, and restoring values in streamed answers.">
+<meta property="og:url" content="https://sundarshahi.github.io/parda/how-it-works.html">
+<meta property="og:image" content="https://sundarshahi.github.io/parda/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap"><a class="brand" href="./"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="3" width="28" height="3" rx="1.5" fill="currentColor"/><path d="M5 6h10v20c-3-1.5-6.5-1.5-10 0z" fill="currentColor"/><path d="M17 6h10v20c-3.5-1.5-7-1.5-10 0z" fill="currentColor" opacity=".55"/></svg>parda</a><nav aria-label="Main"><a href="install.html">Install</a><a href="how-it-works.html" aria-current="page">How it works</a><a href="what-it-masks.html">What it masks</a><a href="tools.html">Supported tools</a><a href="compliance.html">Compliance</a><a href="https://github.com/sundarshahi/parda">GitHub</a></nav></div></header>
+<main id="main"><div class="wrap doc"><aside><h2>Docs</h2><nav aria-label="Docs"><a href="install.html">Install</a><a href="how-it-works.html" aria-current="page">How it works</a><a href="what-it-masks.html">What it masks</a><a href="tools.html">Supported tools</a><a href="security.html">Security</a><a href="compliance.html">For compliance teams</a><a href="faq.html">FAQ</a></nav></aside><article>
+<h1>How parda works</h1>
+<p class="lede">A small program on your machine that every AI request passes through. It masks on the way out and restores on the way back.</p>
+<pre><code>your AI tool ──http──▶ parda (127.0.0.1:7390) ──https──▶ AI company
+  real data             mask ▸ vault ▸ restore             sees stand-ins only</code></pre>
+
+<h2>One request, step by step</h2>
+<ol>
+<li>Your tool sends its request to parda instead of the AI company, because install pointed its base URL there.</li>
+<li>parda reads the JSON body and checks every piece of text: your messages, files the agent read, command output, tool results, the system prompt. It skips structural fields (model names, IDs) and fields that are signed by the provider (thinking blocks), because changing those breaks the next request.</li>
+<li>Each find is replaced by a stand-in. The request goes on to the AI company — or to whatever proxy or gateway you used before.</li>
+<li>The answer streams back. parda restores stand-ins as each piece arrives and passes it straight on.</li>
+</ol>
+
+<h2>The technique for each kind of data</h2>
+<p>parda chooses automatically. There is nothing to set.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Data</th><th>Technique</th><th>The AI sees</th></tr></thead>
+<tbody>
+<tr><td>API keys, tokens, private keys, passwords</td><td>Tokenized: replaced, and restored only on your machine</td><td><code>[SECRET_8b01e4aa]</code></td></tr>
+<tr><td>Names, phone numbers, IDs, card and bank numbers, IP addresses</td><td>Pseudonymized: the same value always gets the same stand-in</td><td><code>[PERSON_3f9a2c1d]</code></td></tr>
+<tr><td>Email addresses</td><td>A stand-in that is still a valid email, so code that checks the format keeps working</td><td><code>email_51c0d9e2@parda.invalid</code></td></tr>
+</tbody></table></div>
+
+<h3>Why secrets aren't simply deleted</h3>
+<p>Agents edit files by writing their content back. If the AI saw <code>[REDACTED]</code> in your <code>.env</code> file, it would write <code>[REDACTED]</code> back and your key would be gone. A stand-in is swapped for the real key on your machine just before the edit happens, so the file stays intact and the AI company still never sees the key.</p>
+
+<h3>Why the same value gets the same stand-in</h3>
+<p>Each stand-in is a keyed BLAKE3 hash of the value. The key is 32 random bytes in <code>~/.parda/key</code>, readable only by you, and never sent anywhere. So:</p>
+<ul>
+<li>the AI can still tell "the same person in two places" from "two different people";</li>
+<li>a long conversation keeps the same stand-ins from turn to turn, so the AI company's prompt caching keeps working;</li>
+<li>nobody without your key can work back from a stand-in to the value.</li>
+</ul>
+
+<h3>The vault</h3>
+<p>The table from stand-in to real value lives only in parda's memory. It is never written to disk and is gone when parda stops. After a restart, the next request — which carries the whole conversation again — refills it with the same stand-ins. It is capped at 100,000 entries so memory stays small.</p>
+
+<h3>Stand-ins split across a stream</h3>
+<p>AI answers arrive in small pieces. A stand-in can be cut in half: <code>[PERS</code> in one piece and <code>ON_3f9a2c1d] said</code> in the next. parda holds back only the few characters that could be the start of a stand-in and joins them with the next piece. This also works inside tool calls, where the restored value is escaped so the tool's JSON stays valid.</p>
+
+<h3>Telling the model</h3>
+<p>Models treat unfamiliar placeholders as redactions and may refuse to repeat them. When a request carries stand-ins, parda adds one short note to the system instructions: they are placeholders for values the user already has, to be used exactly as written. Without this note, Claude refused to repeat a masked name in our tests; with it, it worked.</p>
+
+<h2>Fails closed</h2>
+<ul>
+<li><strong>parda isn't running:</strong> your tool can't connect and shows an error. Nothing is sent.</li>
+<li><strong>The body isn't JSON, or is compressed:</strong> refused with a clear message, because parda can't check it.</li>
+<li><strong>A WebSocket connection:</strong> refused, so tools like Codex fall back to normal HTTPS, which parda can check.</li>
+<li><strong>The AI company or your gateway is unreachable:</strong> a clear "parda could not reach …" error.</li>
+</ul>
+
+<h2>Speed and size</h2>
+<p>Measured on an Apple M2 Pro:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>What</th><th class="num">Measured</th></tr></thead>
+<tbody>
+<tr><td>Program size</td><td class="num">2.0 MB</td></tr>
+<tr><td>Memory when idle</td><td class="num">2.5 MB</td></tr>
+<tr><td>Checking the text of a 150 KB Claude Code request</td><td class="num">4 ms</td></tr>
+<tr><td>Whole masking step for that request (read, check, write)</td><td class="num">6–8 ms</td></tr>
+<tr><td>CPU when no requests are running</td><td class="num">none</td></tr>
+</tbody></table></div>
+<p>The full design, with the alternatives we rejected and why, is in <a href="https://github.com/sundarshahi/parda/blob/main/docs/design.md">docs/design.md</a>.</p>
+</article></div></main>
+<footer class="foot"><div class="wrap"><span>parda is free and open source (MIT or Apache-2.0). No paid plan, no accounts, no telemetry.</span><span><a href="https://github.com/sundarshahi/parda">Source</a> · <a href="https://github.com/sundarshahi/parda/blob/main/CONTRIBUTING.md">Contribute</a> · <a href="security.html">Report a security issue</a></span></div></footer>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parda — keep secrets and personal data out of AI tools</title>
+<meta name="description" content="Free, open-source local proxy that masks API keys, passwords, names, emails and IDs before Claude Code, Codex and other AI tools send them — and restores them in the answer.">
+<link rel="canonical" href="https://sundarshahi.github.io/parda/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta name="theme-color" content="#1f6f78">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="parda">
+<meta property="og:title" content="parda — keep secrets and personal data out of AI tools">
+<meta property="og:description" content="Free, open-source local proxy that masks API keys, passwords, names, emails and IDs before Claude Code, Codex and other AI tools send them — and restores them in the answer.">
+<meta property="og:url" content="https://sundarshahi.github.io/parda/">
+<meta property="og:image" content="https://sundarshahi.github.io/parda/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "parda", "applicationCategory": "SecurityApplication", "operatingSystem": "macOS, Linux", "description": "Local proxy that masks secrets and personal data before AI coding agents and apps send them, and restores the real values in the answer.", "url": "https://sundarshahi.github.io/parda/", "downloadUrl": "https://github.com/sundarshahi/parda/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Does parda send my data anywhere to check it?", "acceptedAnswer": {"@type": "Answer", "text": "No. parda checks everything on your machine with fixed rules. It never asks an AI model or any outside service whether something is sensitive, and it makes no network calls of its own. The only traffic it sends is the request your AI tool was already making, with the sensitive parts replaced."}}, {"@type": "Question", "name": "Will my coding agent still work?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The AI sees a stand-in like [PERSON_8b01e4aa] instead of a name, and parda puts the real value back into the answer before your tool sees it — including into the commands and file edits an agent makes. parda also tells the model that stand-ins are placeholders to use as written. We tested this with Claude Code writing a file that contains a masked name, email and password: the file came out with the real values."}}, {"@type": "Question", "name": "What happens if parda stops?", "acceptedAnswer": {"@type": "Answer", "text": "Your AI tools fail with a connection error until it is running again. That is on purpose: a request never goes out unfiltered. parda starts at login and restarts itself if it crashes."}}, {"@type": "Question", "name": "Is the data anonymized?", "acceptedAnswer": {"@type": "Answer", "text": "No, and we don't claim it is. Stand-ins are pseudonyms: your machine can turn them back into real values. Under GDPR that is still personal data. What parda guarantees is narrower and checkable: the real values never leave your machine."}}, {"@type": "Question", "name": "Does it slow anything down?", "acceptedAnswer": {"@type": "Answer", "text": "Barely. Masking a 150 KB Claude Code request takes about 6–8 ms on an Apple M2 Pro; the AI's own answer takes seconds. parda is a 2 MB program that uses about 2.5 MB of memory when idle and no CPU when nothing is happening."}}, {"@type": "Question", "name": "Are there settings?", "acceptedAnswer": {"@type": "Answer", "text": "No. parda picks the right technique for each kind of data and routes your tools automatically. If something you already used sat between your tools and the AI (another proxy, a company gateway), parda keeps sending requests on to it."}}]}</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap"><a class="brand" href="./"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="3" width="28" height="3" rx="1.5" fill="currentColor"/><path d="M5 6h10v20c-3-1.5-6.5-1.5-10 0z" fill="currentColor"/><path d="M17 6h10v20c-3.5-1.5-7-1.5-10 0z" fill="currentColor" opacity=".55"/></svg>parda</a><nav aria-label="Main"><a href="install.html">Install</a><a href="how-it-works.html">How it works</a><a href="what-it-masks.html">What it masks</a><a href="tools.html">Supported tools</a><a href="compliance.html">Compliance</a><a href="https://github.com/sundarshahi/parda">GitHub</a></nav></div></header>
+<main id="main">
+<div class="wrap">
+<section class="hero">
+<h1>Use AI without handing it your secrets</h1>
+<p class="lede">parda sits between your machine and every AI service. Before a request leaves, it swaps API keys, passwords, names, emails and ID numbers for stand-ins. When the answer comes back, it puts the real values back. The AI never sees them; you never notice.</p>
+<div class="install"><pre><code>curl -fsSL https://raw.githubusercontent.com/sundarshahi/parda/main/install.sh | sh</code></pre><p>macOS and Linux. One command, no settings. <a href="install.html">Other ways to install</a></p></div>
+<div class="actions"><a class="btn primary" href="install.html">Install parda</a><a href="how-it-works.html">See how it works</a></div>
+</section>
+
+<section aria-labelledby="flow-h">
+<h2 id="flow-h" class="prose" style="margin-top:0">What each side sees</h2>
+<div class="flow">
+<figure><figcaption>You ask your coding agent</figcaption><pre>Add <span class="hl">Sita Sharma</span> (<span class="hl">sita@acme.com</span>) to the staff seed file and connect with DB_PASSWORD=<span class="hl">Hunter2Hunter2</span></pre></figure>
+<figure><figcaption>The AI company receives</figcaption><pre>Add <span class="hl">[PERSON_3f9a2c1d]</span> (<span class="hl">email_51c0d9e2@parda.invalid</span>) to the staff seed file and connect with DB_PASSWORD=<span class="hl">[SECRET_8b01e4aa]</span></pre></figure>
+<figure><figcaption>Your seed file ends up with</figcaption><pre>- name:  "<span class="hl">Sita Sharma</span>"
+  email: "<span class="hl">sita@acme.com</span>"</pre></figure>
+</div>
+</section>
+
+<section class="section" aria-labelledby="why-h">
+<h2 id="why-h">Built to be trusted</h2>
+<div class="points">
+<div><h3>Nothing leaves to be checked</h3><p>Detection runs on your machine with rules. No AI model, no cloud scanner, no telemetry. The table that maps stand-ins back to real values lives only in memory.</p></div>
+<div><h3>No settings</h3><p>Install once. Claude Code, Codex, Aider and apps using the Anthropic or OpenAI SDKs are routed through parda automatically. Uninstall puts every file back exactly.</p></div>
+<div><h3>Fails closed</h3><p>If parda isn't running, AI requests fail with a clear error instead of going out unfiltered. Bodies it can't read are refused, not forwarded.</p></div>
+<div><h3>Agents keep working</h3><p>Each value always gets the same stand-in, so the AI can still tell one person from two, prompt caching keeps working, and real values come back into commands and file edits.</p></div>
+<div><h3>Light</h3><p>A 2 MB program using about 2.5 MB of memory. Masking a large agent request takes a few milliseconds.</p></div>
+<div><h3>Speaks Nepali too</h3><p>Names in Devanagari and romanised Nepali, Nepali ID labels like PAN and नागरिकता, and Devanagari digits — alongside English names and global formats.</p></div>
+</div>
+</section>
+
+<section class="section prose" aria-labelledby="who-h">
+<h2 id="who-h">Who it's for</h2>
+<ul>
+<li><strong>Developers</strong> who let coding agents read <code>.env</code> files, logs and customer data.</li>
+<li><strong>Companies</strong> whose staff use AI tools on code and documents that hold personal data.</li>
+<li><strong>Compliance teams</strong> who need a local control and an evidence log for SOC 2, ISO 27001 and GDPR. <a href="compliance.html">What parda gives you</a>.</li>
+</ul>
+</section>
+
+<section class="section prose" aria-labelledby="faq-h">
+<h2 id="faq-h">Questions</h2>
+<details><summary>Does parda send my data anywhere to check it?</summary><p>No. parda checks everything on your machine with fixed rules. It never asks an AI model or any outside service whether something is sensitive, and it makes no network calls of its own. The only traffic it sends is the request your AI tool was already making, with the sensitive parts replaced.</p></details><details><summary>Will my coding agent still work?</summary><p>Yes. The AI sees a stand-in like [PERSON_8b01e4aa] instead of a name, and parda puts the real value back into the answer before your tool sees it — including into the commands and file edits an agent makes. parda also tells the model that stand-ins are placeholders to use as written. We tested this with Claude Code writing a file that contains a masked name, email and password: the file came out with the real values.</p></details><details><summary>What happens if parda stops?</summary><p>Your AI tools fail with a connection error until it is running again. That is on purpose: a request never goes out unfiltered. parda starts at login and restarts itself if it crashes.</p></details><details><summary>Is the data anonymized?</summary><p>No, and we don't claim it is. Stand-ins are pseudonyms: your machine can turn them back into real values. Under GDPR that is still personal data. What parda guarantees is narrower and checkable: the real values never leave your machine.</p></details><details><summary>Does it slow anything down?</summary><p>Barely. Masking a 150 KB Claude Code request takes about 6–8 ms on an Apple M2 Pro; the AI's own answer takes seconds. parda is a 2 MB program that uses about 2.5 MB of memory when idle and no CPU when nothing is happening.</p></details><details><summary>Are there settings?</summary><p>No. parda picks the right technique for each kind of data and routes your tools automatically. If something you already used sat between your tools and the AI (another proxy, a company gateway), parda keeps sending requests on to it.</p></details>
+<p><a href="faq.html">All questions</a></p>
+</section>
+</div>
+</main>
+<footer class="foot"><div class="wrap"><span>parda is free and open source (MIT or Apache-2.0). No paid plan, no accounts, no telemetry.</span><span><a href="https://github.com/sundarshahi/parda">Source</a> · <a href="https://github.com/sundarshahi/parda/blob/main/CONTRIBUTING.md">Contribute</a> · <a href="security.html">Report a security issue</a></span></div></footer>
+</body>
+</html>

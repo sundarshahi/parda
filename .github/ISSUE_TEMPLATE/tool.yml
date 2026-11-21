@@ -1,0 +1,21 @@
+name: Tool support
+description: Ask for (or report on) support for an AI tool.
+labels: [tool]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: Tool and version
+      placeholder: "Gemini CLI 0.20"
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How does it reach the AI service?
+      description: A base-URL setting or environment variable, a proxy setting, or a link to its docs.
+  - type: textarea
+    id: result
+    attributes:
+      label: If you tried it with parda, what happened?
+      render: text
