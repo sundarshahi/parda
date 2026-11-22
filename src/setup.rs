@@ -13,6 +13,7 @@ use std::time::Duration;
 
 const MARK_START: &str = "# >>> parda >>>";
 const MARK_END: &str = "# <<< parda <<<";
+#[cfg(target_os = "macos")]
 const SERVICE: &str = "dev.parda";
 pub const ANTHROPIC_DEFAULT: &str = "https://api.anthropic.com";
 pub const OPENAI_DEFAULT: &str = "https://api.openai.com/v1";
