@@ -41,3 +41,29 @@ jobs:
           bytes=$(stat -c %s target/release/parda)
           echo "parda is $bytes bytes"
           test "$bytes" -lt 5242880
+
+  installer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo build --release --locked
+      - name: install.sh installs and uninstalls (UTF-8 locale, throwaway home)
+        shell: bash
+        env:
+          LC_ALL: ${{ matrix.os == 'macos-latest' && 'en_US.UTF-8' || 'C.UTF-8' }}
+          PARDA_NO_SERVICE: "1"
+        run: |
+          set -eu
+          case "$(uname -s)" in Darwin) os=apple-darwin ;; *) os=unknown-linux-musl ;; esac
+          case "$(uname -m)" in arm64 | aarch64) arch=aarch64 ;; *) arch=x86_64 ;; esac
+          dist="$RUNNER_TEMP/dist"; home="$RUNNER_TEMP/home"; mkdir -p "$dist" "$home"
+          file="parda-$arch-$os.tar.gz"
+          tar -czf "$dist/$file" -C target/release parda
+          (cd "$dist" && shasum -a 256 "$file" > "$file.sha256")
+          HOME="$home" PARDA_BASE_URL="file://$dist" sh install.sh
+          test -x "$home/.parda/bin/parda"
+          HOME="$home" "$home/.parda/bin/parda" uninstall

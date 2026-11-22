@@ -29,7 +29,7 @@ base="${PARDA_BASE_URL:-$base}" # a mirror, or a local folder for testing
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-echo "Downloading $file…"
+echo "Downloading ${file}..."
 curl -fsSL "$base/$file" -o "$tmp/$file"
 curl -fsSL "$base/$file.sha256" -o "$tmp/$file.sha256"
 if command -v shasum >/dev/null 2>&1; then
