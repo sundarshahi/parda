@@ -31,7 +31,8 @@ parda is free, open source (MIT OR Apache-2.0), with **no paid plan**.
 - Browser chat UIs and web forms (planned: a browser extension sharing the same rules).
 - Cursor (it builds prompts on its own servers; a local proxy can't see them) and Copilot inline
   completions (need TLS interception).
-- Images, PDFs and audio inside requests: passed through unscanned, documented as a limitation.
+- Images, PDFs and audio inside requests: passed through unscanned, documented as a limitation. Inline
+  text files (`data:text/*`, JSON, CSV, YAML, XML) are decoded, masked and encoded again.
 - AI-based detection (100 MB–1 GB models break the weight goal).
 - A paid tier, accounts, telemetry, or any network call parda makes on its own.
 
@@ -65,12 +66,16 @@ parda is free, open source (MIT OR Apache-2.0), with **no paid plan**.
 2. A request arrives. parda parses the JSON body and walks every string value except structural and
    signed fields (`model`, ids, `signature`, `thinking`, encrypted reasoning, base64 media). Inside a
    tool's `input` nothing is skipped: any key there can hold user data.
-3. Each string is scanned by the rules in one pass per rule. Overlapping finds keep the earliest, longest.
+3. Each string is scanned by the rules in one pass per rule, and for every value masked before (the
+   model's answer puts the real password into a command; the next request carries that command without
+   the `DB_PASSWORD=` it was found by). A string under a key named like a secret (`{"DB_PASSWORD": "…"}`)
+   is masked whole. Overlapping finds keep the earliest, longest.
 4. Each find becomes a stand-in. The JSON is re-serialized (key order preserved) and sent upstream.
 5. The response streams back. parda restores stand-ins inside each event. When a delta ends with what
    could be the start of a stand-in, that whole event is held until the next one: if it continues the
    same field the characters move forward; if another field streams in between, they wait for their own
-   field; otherwise the event goes out unchanged. Events are never reordered or duplicated.
+   field; otherwise the event goes out unchanged. Keep-alives (comments, `ping`) pass straight through and
+   don't end what is held. Events are never duplicated.
 
 ### Techniques — chosen per kind of data, automatically
 
@@ -130,8 +135,11 @@ a miss is a leak.
 - Request body that isn't JSON, or is compressed → refused with a clear error (it can't be scanned).
   The body forwarded is always parda's re-written JSON, never the original bytes (a duplicate key that
   parsing dropped can't ride along).
-- Sensitive data in the query string → refused (the URL is forwarded as it is). Headers are forwarded
-  as they are: they carry the user's API key to the provider.
+- Sensitive data in the query string → refused (the URL is forwarded as it is; checked percent-decoded).
+  Headers are forwarded as they are: they carry the user's API key to the provider.
+- A request from a web page (`Origin` or `Sec-Fetch-Site` present) or with a `Host` other than parda's
+  own address (DNS rebinding) → `403`. Idle connections close after 120 s; at most 512 at once; request
+  lines and headers are capped at 64 KB.
 - Upstream cut off mid-answer → the connection is dropped (stream) or a `502` returned (JSON), never a
   clean ending.
 - WebSocket upgrade → `426 Upgrade Required`, the answer Codex expects before falling back to HTTPS
@@ -148,7 +156,7 @@ Never values. Rotated at 10 MB (one old file kept). `parda status` summarises it
 | Command | What it does |
 |---|---|
 | `parda install` | Copies itself to `~/.parda/bin`, starts at login (launchd / systemd user), routes AI tools through it |
-| `parda uninstall` | Puts every file it touched back exactly |
+| `parda uninstall` | Puts every file it touched back as it was (byte for byte unless the user changed it meanwhile) |
 | `parda status` | Running? Where each route goes, what was masked today |
 | `parda mask` | Masks stdin to stdout — try it, or use it before pasting into a web chat |
 | `parda run` | Runs the proxy in the foreground (what the background service runs) |
@@ -159,7 +167,15 @@ Works through a base URL: Claude Code (CLI and IDE extensions; tested end to end
 file; ChatGPT sign-in is recognised by its `chatgpt-account-id` header and sent to ChatGPT's backend —
 untested), Aider, anything using the Anthropic or OpenAI SDKs that honours `ANTHROPIC_BASE_URL` /
 `OPENAI_BASE_URL`.
-Not covered: Cursor, Copilot inline completions, Gemini CLI with Google sign-in, desktop chat apps.
+Gemini CLI: `GOOGLE_GEMINI_BASE_URL` (API key, also read by Google's Gen AI SDKs) → `/gemini`, and
+`CODE_ASSIST_ENDPOINT` (sign-in with Google; requests wrapped in `request`, answers in `response`) →
+`/gemini-code`. Media in `inlineData`, `thoughtSignature` (signed) are never touched; `functionCall.args`
+and `functionResponse.response` are scanned whatever their keys; thought summaries stream on their own
+path so their held characters never join the answer. A Gemini API key in the URL (`?key=`) is allowed:
+it goes to the provider it belongs to, like a header.
+Copilot CLI and VS Code chat with the user's own key: documented two-line setup, not automatic (it
+changes who the user pays).
+Not covered: Cursor, Copilot with GitHub's models and inline completions, desktop chat apps.
 
 ## Weight budget (checked in CI)
 

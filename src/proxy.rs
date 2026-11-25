@@ -10,12 +10,17 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use ureq::http;
 
 pub const PORT: u16 = 7390;
 const MAX_HEAD: usize = 64 << 10;
 const MAX_BODY: usize = 64 << 20;
+/// Connections served at once; more are refused so idle ones can't use up the process.
+const MAX_CONNECTIONS: usize = 512;
+/// A client silent this long between requests (or mid-request) is disconnected.
+const IDLE: Duration = Duration::from_secs(120);
 /// Where Codex sends requests when signed in with ChatGPT rather than an API key.
 const CHATGPT_CODEX: &str = "https://chatgpt.com/backend-api/codex";
 
@@ -63,12 +68,37 @@ impl State {
 }
 
 pub fn serve(state: Arc<State>, listener: TcpListener) {
-    for conn in listener.incoming().flatten() {
-        let state = state.clone();
-        std::thread::spawn(move || {
+    let port = listener.local_addr().map_or(PORT, |a| a.port());
+    raise_file_limit();
+    let open = Arc::new(AtomicUsize::new(0));
+    for mut conn in listener.incoming().flatten() {
+        if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+            open.fetch_sub(1, Ordering::SeqCst);
+            let _ = error(&mut conn, 503, "parda has too many open connections; try again");
+            continue;
+        }
+        let (state, done) = (state.clone(), open.clone());
+        let spawned = std::thread::Builder::new().spawn(move || {
             conn.set_nodelay(true).ok();
-            let _ = connection(&state, conn);
+            conn.set_read_timeout(Some(IDLE)).ok();
+            let _ = connection(&state, conn, port);
+            done.fetch_sub(1, Ordering::SeqCst);
         });
+        if spawned.is_err() {
+            open.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+/// launchd starts services with a 256 open-file limit; raise it to what the system allows.
+fn raise_file_limit() {
+    let mut l = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit/setrlimit only read and write the struct passed in.
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut l) == 0 && l.rlim_cur < 4096 {
+            l.rlim_cur = l.rlim_max.min(4096);
+            libc::setrlimit(libc::RLIMIT_NOFILE, &l);
+        }
     }
 }
 
@@ -86,7 +116,7 @@ impl Request {
     }
 }
 
-fn connection(state: &State, conn: TcpStream) -> io::Result<()> {
+fn connection(state: &State, conn: TcpStream, port: u16) -> io::Result<()> {
     let mut reader = BufReader::new(conn.try_clone()?);
     let mut out = conn;
     loop {
@@ -97,17 +127,30 @@ fn connection(state: &State, conn: TcpStream) -> io::Result<()> {
                 return error(&mut out, 400, &format!("parda could not read the request: {e}"));
             }
         };
-        handle(state, &req, &mut out)?;
+        handle(state, &req, &mut out, port)?;
         if req.close {
             return Ok(());
         }
     }
 }
 
+/// One line, at most `MAX_HEAD` bytes: a longer one is an error, not a growing buffer.
+fn read_line(r: &mut impl BufRead, buf: &mut String) -> io::Result<usize> {
+    let n = r.by_ref().take(MAX_HEAD as u64).read_line(buf)?;
+    if n == MAX_HEAD && !buf.ends_with('\n') {
+        return Err(io::Error::other("line too long"));
+    }
+    Ok(n)
+}
+
 fn read_request(r: &mut impl BufRead) -> io::Result<Option<Request>> {
     let mut line = String::new();
-    if r.read_line(&mut line)? == 0 {
-        return Ok(None);
+    match read_line(r, &mut line) {
+        Ok(0) => return Ok(None),
+        Ok(_) => {}
+        // An idle keep-alive connection timing out: close quietly, never answer a request not made.
+        Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => return Ok(None),
+        Err(e) => return Err(e),
     }
     let mut parts = line.split_whitespace();
     let (Some(method), Some(target), Some(version)) = (parts.next(), parts.next(), parts.next()) else {
@@ -118,7 +161,7 @@ fn read_request(r: &mut impl BufRead) -> io::Result<Option<Request>> {
     let mut size = line.len();
     loop {
         line.clear();
-        size += r.read_line(&mut line)?;
+        size += read_line(r, &mut line)?;
         if size > MAX_HEAD {
             return Err(io::Error::other("headers too large"));
         }
@@ -136,13 +179,13 @@ fn read_request(r: &mut impl BufRead) -> io::Result<Option<Request>> {
     if get("transfer-encoding").is_some_and(|v| v.contains("chunked")) {
         loop {
             line.clear();
-            r.read_line(&mut line)?;
+            read_line(r, &mut line)?;
             let n = usize::from_str_radix(line.trim().split(';').next().unwrap_or(""), 16)
                 .map_err(|_| io::Error::other("bad chunk size"))?;
             if n == 0 {
                 loop {
                     line.clear();
-                    if r.read_line(&mut line)? == 0 || line.trim().is_empty() {
+                    if read_line(r, &mut line)? == 0 || line.trim().is_empty() {
                         break;
                     }
                 }
@@ -155,7 +198,7 @@ fn read_request(r: &mut impl BufRead) -> io::Result<Option<Request>> {
             body.resize(at + n, 0);
             r.read_exact(&mut body[at..])?;
             line.clear();
-            r.read_line(&mut line)?;
+            read_line(r, &mut line)?;
         }
     } else if let Some(n) = get("content-length") {
         let n: usize = n.trim().parse().map_err(|_| io::Error::other("bad content-length"))?;
@@ -168,7 +211,41 @@ fn read_request(r: &mut impl BufRead) -> io::Result<Option<Request>> {
     Ok(Some(Request { method, target, headers, body, close }))
 }
 
-fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
+/// `%40` → `@`, `+` → space: what the server will read.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16);
+        match b[i] {
+            b'%' if i + 2 < b.len() => match (hex(b[i + 1]), hex(b[i + 2])) {
+                (Some(h), Some(l)) => {
+                    out.push((h * 16 + l) as u8);
+                    i += 3;
+                    continue;
+                }
+                _ => out.push(b'%'),
+            },
+            b'+' => out.push(b' '),
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn handle(state: &State, req: &Request, out: &mut TcpStream, port: u16) -> io::Result<()> {
+    // Only programs on this computer, never a web page: a page can reach 127.0.0.1 too, and with DNS
+    // rebinding read the answers. Browsers always send Origin or Sec-Fetch-Site; local tools don't.
+    let host_ok = req.header("host").is_some_and(|h| {
+        [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")]
+            .iter()
+            .any(|ok| h.eq_ignore_ascii_case(ok))
+    });
+    if !host_ok || req.header("origin").is_some() || req.header("sec-fetch-site").is_some() {
+        return error(out, 403, "parda only accepts requests from programs on this computer, not from web pages");
+    }
     if req.method == "GET" && req.target == "/parda/health" {
         return respond(out, 200, &[("content-type", "text/plain")], b"parda ok\n");
     }
@@ -186,25 +263,40 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
         return error(out, 415, "parda can't scan a compressed request body, so it wasn't sent");
     }
 
-    // Query strings are forwarded as they are, so they must hold nothing parda would mask.
+    let api = match route.prefix.as_str() {
+        "/anthropic" => body::Api::Anthropic,
+        p if p.starts_with("/gemini") => body::Api::Gemini,
+        _ => body::Api::OpenAi,
+    };
+    // Query strings are forwarded as they are, so they must hold nothing parda would mask (checked
+    // decoded: `%40` is an `@`). Gemini may carry the user's own API key as `key=`; it goes to the
+    // provider it belongs to, like a header.
     if let Some((_, query)) = req.target.split_once('?') {
-        if !crate::detect::scan(query).is_empty() {
+        let scanned = query.split('&').filter(|p| !(api == body::Api::Gemini && p.starts_with("key=")));
+        if scanned.into_iter().any(|p| !crate::detect::scan(&percent_decode(p)).is_empty()) {
             return error(out, 400, "parda found sensitive data in the URL and didn't send the request");
         }
     }
 
+    let rest = &req.target[route.prefix.len()..];
+    let path = rest.split('?').next().unwrap_or("");
+    // Requests that ask the model for an answer; others (embeddings, token counts) take no extra fields.
+    let note = match api {
+        body::Api::Anthropic => path.ends_with("/messages"),
+        body::Api::OpenAi => path.ends_with("/chat/completions") || path.ends_with("/responses"),
+        body::Api::Gemini => path.contains("enerateContent"),
+    };
     let started = Instant::now();
     let mut counts = Counts::new();
     let body = if req.body.is_empty() {
         Vec::new()
     } else {
-        match body::mask_request(&state.vault, &req.body, &mut counts, route.prefix == "/anthropic") {
+        match body::mask_request(&state.vault, &req.body, &mut counts, api, note) {
             Ok(b) => b,
             Err(e) => return error(out, 415, &format!("parda only forwards JSON it can scan: {e}")),
         }
     };
     let mask_us = started.elapsed().as_micros() as u64;
-    let rest = &req.target[route.prefix.len()..];
     // Codex signed in with ChatGPT sends this header and talks to ChatGPT's backend instead of the API.
     let upstream = if route.upstream == crate::setup::OPENAI_DEFAULT && req.header("chatgpt-account-id").is_some() {
         CHATGPT_CODEX
@@ -285,7 +377,6 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
         out.flush()?;
     }
 
-    let path = rest.split('?').next().unwrap_or("");
     log::append(
         &state.home,
         &log::Record { api: &route.prefix[1..], method: &req.method, path, status, masked: &counts, restored, mask_us },
@@ -327,4 +418,14 @@ fn respond(out: &mut TcpStream, status: u16, headers: &[(&str, &str)], body: &[u
 fn error(out: &mut TcpStream, status: u16, message: &str) -> io::Result<()> {
     let body = serde_json::json!({"type": "error", "error": {"type": "parda_error", "message": message}});
     respond(out, status, &[("content-type", "application/json")], body.to_string().as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn percent_decoding() {
+        assert_eq!(super::percent_decode("user=ram%40example.com&q=a+b%2Dc"), "user=ram@example.com&q=a b-c");
+        assert_eq!(super::percent_decode("50%"), "50%");
+        assert_eq!(super::percent_decode("%zz%4"), "%zz%4");
+    }
 }

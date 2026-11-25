@@ -25,8 +25,11 @@ impl Drop for Parda {
 fn start(upstream: &str, name: &str) -> Parda {
     let home = std::env::temp_dir().join(format!("parda-it-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    std::fs::write(home.join("upstreams.json"), json!({"anthropic": upstream, "openai": upstream}).to_string())
-        .unwrap();
+    std::fs::write(
+        home.join("upstreams.json"),
+        json!({"anthropic": upstream, "openai": upstream, "gemini": upstream, "gemini-code": upstream}).to_string(),
+    )
+    .unwrap();
     // Port 0: parda picks a free port and says which, so parallel tests never collide.
     let mut child = Command::new(env!("CARGO_BIN_EXE_parda"))
         .arg("run")
@@ -107,9 +110,25 @@ fn echo_split(body: &str) -> (String, String) {
     ("text/event-stream".into(), sse)
 }
 
+/// The same, as Gemini CLI signed in with Google receives it: whole responses wrapped in `response`.
+fn echo_split_gemini(body: &str) -> (String, String) {
+    let mut sse = String::new();
+    for t in tokens(body) {
+        let (a, b) = t.split_at(t.len() / 2);
+        for piece in [format!(" <{a}"), format!("{b}>")] {
+            let ev = json!({"response": {"candidates": [{"content": {"role": "model", "parts": [{"text": piece}]}, "index": 0}]}});
+            sse += &format!("data: {ev}\r\n\r\n");
+        }
+    }
+    ("text/event-stream".into(), sse)
+}
+
 fn post(port: u16, path: &str, headers: &[(&str, &str)], body: &[u8]) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    let mut req = format!("POST {path} HTTP/1.1\r\nhost: x\r\nconnection: close\r\ncontent-length: {}\r\n", body.len());
+    let mut req = format!("POST {path} HTTP/1.1\r\nconnection: close\r\ncontent-length: {}\r\n", body.len());
+    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+        req += &format!("host: 127.0.0.1:{port}\r\n");
+    }
     for (k, v) in headers {
         req += &format!("{k}: {v}\r\n");
     }
@@ -176,6 +195,44 @@ fn provider_sees_stand_ins_client_sees_real_values() {
 }
 
 #[test]
+fn gemini_cli_signed_in_with_google() {
+    let (url, seen) = fake_upstream(echo_split_gemini);
+    let p = start(&url, "gemini");
+    let request = json!({"model": "gemini-2.5-pro", "project": "demo-project", "request": {
+        "contents": [{"role": "user", "parts": [{"text": format!("Email Sita Sharma at sita@example.com, key {SECRET}")}]}],
+        "systemInstruction": {"role": "user", "parts": [{"text": "You are Gemini CLI."}]}}});
+    let (status, body) = post(
+        p.port,
+        "/gemini-code/v1internal:streamGenerateContent?alt=sse",
+        &[("content-type", "application/json")],
+        request.to_string().as_bytes(),
+    );
+    assert_eq!(status, 200);
+    let upstream_body = seen.recv_timeout(Duration::from_secs(5)).unwrap();
+    for real in ["Sita Sharma", "sita@example.com", SECRET] {
+        assert!(!upstream_body.contains(real), "{real} reached the provider: {upstream_body}");
+    }
+    let text: String = body
+        .split("\r\n\r\n")
+        .filter_map(|e| e.strip_prefix("data: "))
+        .filter_map(|d| serde_json::from_str::<Value>(d).ok())
+        .filter_map(|v| {
+            v.pointer("/response/candidates/0/content/parts/0/text").and_then(Value::as_str).map(str::to_string)
+        })
+        .collect();
+    assert_eq!(text, format!(" <Sita Sharma> <sita@example.com> <{SECRET}>"));
+
+    // With an API key, Gemini may put the user's own key in the URL: it goes on to Google like a header.
+    let (status, _) = post(
+        p.port,
+        "/gemini/v1beta/models/gemini-2.5-pro:generateContent?key=AIzaSyA1234567890abcdefghijklmnopqrstuv",
+        &[("content-type", "application/json")],
+        b"{}",
+    );
+    assert_eq!(status, 200);
+}
+
+#[test]
 fn json_answers_are_restored_too() {
     let (url, _seen) = fake_upstream(|body| {
         let t = tokens(body).join(" ");
@@ -205,6 +262,8 @@ fn refuses_unscannable_bodies() {
     assert!(form.1.contains("parda_error"));
     let q = post(p.port, "/openai/responses?user=ram@example.com", &[("content-type", "application/json")], b"{}");
     assert_eq!(q.0, 400, "data in the URL is refused");
+    let q = post(p.port, "/openai/responses?user=ram%40example.com", &[("content-type", "application/json")], b"{}");
+    assert_eq!(q.0, 400, "encoded data in the URL is refused too");
     let ws = post(p.port, "/openai/responses", &[("upgrade", "websocket"), ("connection", "upgrade")], b"");
     assert_eq!(ws.0, 426, "Codex falls back to HTTPS only on 426");
     assert!(seen.recv_timeout(Duration::from_millis(300)).is_err(), "nothing may reach the provider");
@@ -215,9 +274,43 @@ fn a_hostile_chunk_size_drops_one_connection_not_the_proxy() {
     let (url, _seen) = fake_upstream(echo_split);
     let p = start(&url, "chunk");
     let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
-    s.write_all(b"POST /anthropic/v1/messages HTTP/1.1\r\nhost: x\r\ntransfer-encoding: chunked\r\n\r\n1\r\nA\r\nffffffffffffffff\r\n").unwrap();
+    s.write_all(
+        b"POST /anthropic/v1/messages HTTP/1.1\r\ntransfer-encoding: chunked\r\n\r\n1\r\nA\r\nffffffffffffffff\r\n",
+    )
+    .unwrap();
     let mut sink = Vec::new();
     s.read_to_end(&mut sink).ok();
+    let (status, _) = post(p.port, "/anthropic/v1/messages", &[("content-type", "application/json")], b"{}");
+    assert_eq!(status, 200, "parda still answers");
+}
+
+#[test]
+fn web_pages_cannot_use_parda() {
+    let (url, seen) = fake_upstream(echo_split);
+    let p = start(&url, "web");
+    let json = ("content-type", "text/plain");
+    let rebinding = post(p.port, "/anthropic/v1/messages", &[json, ("host", "evil.example:7390")], b"{}");
+    assert_eq!(rebinding.0, 403, "DNS rebinding: a foreign Host is refused");
+    let page = post(p.port, "/anthropic/v1/messages", &[json, ("origin", "http://evil.example")], b"{}");
+    assert_eq!(page.0, 403, "a request from a web page is refused");
+    let fetch = post(p.port, "/anthropic/v1/messages", &[json, ("sec-fetch-site", "cross-site")], b"{}");
+    assert_eq!(fetch.0, 403);
+    assert!(seen.recv_timeout(Duration::from_millis(300)).is_err(), "nothing may reach the provider");
+    let local = post(p.port, "/anthropic/v1/messages", &[("host", "localhost:0")], b"{}");
+    assert_eq!(local.0, 403, "the right name with the wrong port is refused too");
+}
+
+#[test]
+fn an_endless_line_drops_one_connection_not_the_proxy() {
+    let (url, _seen) = fake_upstream(echo_split);
+    let p = start(&url, "line");
+    let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+    let mut huge = b"POST /anthropic/".to_vec();
+    huge.resize(200 << 10, b'a');
+    s.write_all(&huge).ok();
+    let mut sink = Vec::new();
+    s.read_to_end(&mut sink).ok();
+    assert!(String::from_utf8_lossy(&sink).contains("400"), "refused, not buffered forever");
     let (status, _) = post(p.port, "/anthropic/v1/messages", &[("content-type", "application/json")], b"{}");
     assert_eq!(status, 200, "parda still answers");
 }

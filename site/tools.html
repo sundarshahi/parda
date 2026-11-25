@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Supported tools · parda</title>
-<meta name="description" content="Which AI tools parda protects: Claude Code, Codex CLI, Aider and apps using the Anthropic or OpenAI SDKs — and which it can&#x27;t, like Cursor.">
+<meta name="description" content="Which AI tools parda protects: Claude Code, Codex CLI, Gemini CLI, Aider, Copilot with your own key and apps using the Anthropic, OpenAI or Gemini SDKs — and which it can&#x27;t, like Cursor.">
 <link rel="canonical" href="https://sundarshahi.github.io/parda/tools.html">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
@@ -12,7 +12,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="parda">
 <meta property="og:title" content="Supported tools · parda">
-<meta property="og:description" content="Which AI tools parda protects: Claude Code, Codex CLI, Aider and apps using the Anthropic or OpenAI SDKs — and which it can&#x27;t, like Cursor.">
+<meta property="og:description" content="Which AI tools parda protects: Claude Code, Codex CLI, Gemini CLI, Aider, Copilot with your own key and apps using the Anthropic, OpenAI or Gemini SDKs — and which it can&#x27;t, like Cursor.">
 <meta property="og:url" content="https://sundarshahi.github.io/parda/tools.html">
 <meta property="og:image" content="https://sundarshahi.github.io/parda/og.png">
 <meta property="og:image:width" content="1200">
@@ -32,15 +32,25 @@
 <tr><td>Codex CLI</td><td><strong>Protected</strong> — set up automatically, not yet tested by us</td><td><code>openai_base_url</code> in <code>~/.codex/config.toml</code>. Sign-in with ChatGPT is routed to ChatGPT's backend; please <a href="https://github.com/sundarshahi/parda/issues/new?template=tool.yml">tell us</a> how it goes.</td></tr>
 <tr><td>Aider</td><td><strong>Protected</strong> — not yet tested by us</td><td><code>OPENAI_API_BASE</code> and <code>ANTHROPIC_API_BASE</code></td></tr>
 <tr><td>Your own apps using the Anthropic or OpenAI SDKs</td><td><strong>Protected</strong></td><td>The SDKs read <code>ANTHROPIC_BASE_URL</code> / <code>OPENAI_BASE_URL</code> when started from a shell.</td></tr>
-<tr><td>Gemini CLI</td><td>Not yet</td><td>Planned (API-key sign-in only; Google-account sign-in can't be routed).</td></tr>
-<tr><td>GitHub Copilot</td><td>Not yet</td><td>Chat with your own key could work; inline completions would need TLS interception.</td></tr>
+<tr><td>Gemini CLI</td><td><strong>Protected</strong> — set up automatically</td><td><code>GOOGLE_GEMINI_BASE_URL</code> (Gemini API key) and <code>CODE_ASSIST_ENDPOINT</code> (sign-in with Google). Your own apps using Google's Gen AI SDK read <code>GOOGLE_GEMINI_BASE_URL</code> too. Tested with a fake provider and the real sign-in calls; Google now refuses personal-account sign-in for Gemini CLI, so use an API key there.</td></tr>
+<tr><td>GitHub Copilot CLI and VS Code chat, with your own key</td><td><strong>Protected</strong> — two lines of setup, <a href="#copilot">below</a></td><td>Copilot can send chat to your own Anthropic or OpenAI key through a base URL. parda doesn't switch this on for you: it changes who you pay.</td></tr>
+<tr><td>GitHub Copilot with GitHub's models, and inline completions</td><td>Can't be protected this way</td><td>They talk to GitHub over encrypted connections with no base URL to take over.</td></tr>
 <tr><td>Cursor</td><td>Can't be protected this way</td><td>Cursor builds prompts on its own servers, so they never pass through your machine as AI requests.</td></tr>
 <tr><td>ChatGPT, Claude, Gemini in the browser</td><td>Planned</td><td>A browser extension using the same rules.</td></tr>
 <tr><td>ChatGPT and Claude desktop apps</td><td>No</td><td>They don't use a base URL; ChatGPT's app also pins its certificates.</td></tr>
 </tbody></table></div>
 
 <h2>Apps started outside a shell</h2>
-<p>Apps opened from the Dock or a launcher don't read your shell's startup files. Claude Code is covered anyway through its settings file and Codex through its config file. Other apps need the two variables set for them; see your system's documentation for setting environment variables for GUI apps.</p>
+<p>Apps opened from the Dock or a launcher don't read your shell's startup files. Claude Code is covered anyway through its settings file and Codex through its config file. Other apps need the variables set for them; see your system's documentation for setting environment variables for GUI apps.</p>
+
+<h2 id="copilot">GitHub Copilot with your own key</h2>
+<p>Copilot CLI, with an OpenAI key:</p>
+<pre><code>export COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:7390/openai
+export COPILOT_PROVIDER_API_KEY=your-openai-key
+export COPILOT_MODEL=gpt-5</code></pre>
+<p>With an Anthropic key, add <code>export COPILOT_PROVIDER_TYPE=anthropic</code> and use <code>http://127.0.0.1:7390/anthropic</code>. See GitHub's <a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models">guide to your own models in Copilot CLI</a>.</p>
+<p>VS Code chat: open <em>Chat: Manage Language Models</em>, choose <em>Add Models</em> then <em>Custom Endpoint</em>, and use <code>http://127.0.0.1:7390/openai/chat/completions</code> (Chat Completions) or <code>http://127.0.0.1:7390/anthropic/v1/messages</code> (Messages) as the model's URL.</p>
+<p>We haven't tested Copilot ourselves yet; please <a href="https://github.com/sundarshahi/parda/issues/new?template=tool.yml">tell us</a> how it goes.</p>
 
 <h2>Already using a proxy or gateway?</h2>
 <p>parda keeps it. Install records where your tools sent requests before and forwards there, so you get parda's masking in front of your existing compression proxy, company gateway or data-residency endpoint. <code>parda status</code> shows each route.</p>

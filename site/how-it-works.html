@@ -71,7 +71,8 @@
 <li><strong>parda isn't running:</strong> your tool can't connect and shows an error. Nothing is sent.</li>
 <li><strong>The body isn't JSON, or is compressed:</strong> refused with a clear message, because parda can't check it.</li>
 <li><strong>A WebSocket connection:</strong> refused, so tools like Codex fall back to normal HTTPS, which parda can check.</li>
-<li><strong>Sensitive data in the URL itself:</strong> refused, because the address is forwarded as it is.</li>
+<li><strong>Sensitive data in the URL itself:</strong> refused, because the address is forwarded as it is (checked after decoding, so <code>%40</code> counts as <code>@</code>).</li>
+<li><strong>A request from a web page:</strong> refused. Only programs on your computer can use parda.</li>
 <li><strong>The answer is cut off upstream:</strong> your tool sees an incomplete answer or an error, never a clean ending.</li>
 <li><strong>The AI company or your gateway is unreachable:</strong> a clear "parda could not reach …" error.</li>
 </ul>

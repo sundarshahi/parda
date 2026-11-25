@@ -19,8 +19,9 @@ Your file ends up with  name: "Sita Sharma", email: "sita@acme.com"
 
 - **Nothing leaves to be checked.** Detection runs on your machine with rules. No AI model, no cloud
   scanner, no telemetry. The table from stand-ins back to real values lives only in memory.
-- **No settings.** Install once; Claude Code, Codex, Aider and apps using the Anthropic or OpenAI SDKs
-  go through parda. `parda uninstall` puts every file back exactly.
+- **No settings.** Install once; Claude Code, Codex, Gemini CLI, Aider and apps using the Anthropic,
+  OpenAI or Gemini SDKs go through parda. `parda uninstall` puts every file back exactly as it was
+  (unless you changed that file yourself meanwhile; then it removes only parda's lines).
 - **Agents keep working.** The same value always gets the same stand-in, prompt caching keeps
   working, and real values come back into commands and file edits — even when a stand-in is split
   across two pieces of a streamed answer.
@@ -63,7 +64,8 @@ parda uninstall                    # put everything back
 | **Names** | Two or more words, English or Devanagari, using lists of given names, middle names and surnames — including Nepali |
 
 Known limits, stated plainly: single-word and lower-case names, addresses and dates of birth are
-not detected, and images, PDFs and audio pass through unchecked.
+not detected, and images, PDFs and audio pass through unchecked (text files sent inline are
+checked).
 [Full list and limits →](https://sundarshahi.github.io/parda/what-it-masks.html)
 
 ## Supported tools
@@ -74,7 +76,10 @@ not detected, and images, PDFs and audio pass through unchecked.
 | Codex CLI | ✓ set up automatically (`~/.codex/config.toml`) |
 | Aider | ✓ via `OPENAI_API_BASE` / `ANTHROPIC_API_BASE` |
 | Apps using the Anthropic / OpenAI SDKs | ✓ via `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` |
-| Gemini CLI, Copilot, browser chats | planned |
+| Gemini CLI | ✓ set up automatically (`GOOGLE_GEMINI_BASE_URL`, `CODE_ASSIST_ENDPOINT`) |
+| GitHub Copilot CLI / VS Code chat with your own key | ✓ [two lines of setup](https://sundarshahi.github.io/parda/tools.html#copilot) |
+| Copilot with GitHub's models, inline completions | can't be covered: no base URL to take over |
+| Browser chats | planned |
 | Cursor | can't be covered: it builds prompts on its own servers |
 
 Already using another proxy or a company gateway? parda keeps it and forwards there.
