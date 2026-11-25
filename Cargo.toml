@@ -1,6 +1,6 @@
 [package]
 name = "parda"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "A curtain between your machine and every AI: masks secrets and personal data before AI coding agents send them, restores them in the answer. Local, no settings."
@@ -15,7 +15,10 @@ exclude = ["/.github", "/docs"]
 [dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+# arbitrary_precision: numbers go out exactly as they came in (no 64-bit rounding).
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+aho-corasick = "1"
+base64 = "0.23"
 blake3 = { version = "1", default-features = false, features = ["pure", "std"] }
 libc = "0.2"
 

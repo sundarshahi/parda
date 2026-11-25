@@ -35,12 +35,15 @@
 <h2>What it doesn't protect against</h2>
 <ul>
 <li>Data parda's rules don't recognise. See <a href="what-it-masks.html">known limits</a>.</li>
-<li>Images, PDFs and audio sent inside requests.</li>
+<li>Images, PDFs and audio sent inside requests (text files sent inline are checked).</li>
 <li>Tools that don't route through parda (see <a href="tools.html">Supported tools</a>), or a tool you point elsewhere yourself.</li>
 <li>Someone who can already run programs as you on your machine. They could read your files directly.</li>
 <li>Telemetry a tool sends to its own maker, separately from its AI requests.</li>
 <li>Request headers. They are forwarded as they are, because they carry your API key to the provider.</li>
 </ul>
+
+<h2>The local port</h2>
+<p>parda listens on <code>127.0.0.1:7390</code> only, and only for programs on your computer. A web page can reach that address too, so parda refuses any request a browser makes (browsers always send <code>Origin</code> or <code>Sec-Fetch-Site</code>) and any request whose <code>Host</code> isn't parda's own address, which stops DNS-rebinding tricks. Idle connections are closed after two minutes and at most 512 are served at once, so a stuck program can't wear parda out.</p>
 
 <h2>Where your data lives</h2>
 <div class="table-scroll"><table>

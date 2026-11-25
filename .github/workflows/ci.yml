@@ -15,7 +15,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - name: Minimum supported Rust version (1.85)
@@ -28,13 +28,13 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cargo test --all-targets --locked
 
   size:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cargo build --release --locked
       - name: Release binary stays under 5 MB
         run: |
@@ -49,7 +49,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cargo build --release --locked
       - name: install.sh installs and uninstalls (UTF-8 locale, throwaway home)
         shell: bash

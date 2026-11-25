@@ -20,7 +20,8 @@ Your file ends up with  name: "Sita Sharma", email: "sita@acme.com"
 - **Nothing leaves to be checked.** Detection runs on your machine with rules. No AI model, no cloud
   scanner, no telemetry. The table from stand-ins back to real values lives only in memory.
 - **No settings.** Install once; Claude Code, Codex, Gemini CLI, Aider and apps using the Anthropic,
-  OpenAI or Gemini SDKs go through parda. `parda uninstall` puts every file back exactly.
+  OpenAI or Gemini SDKs go through parda. `parda uninstall` puts every file back exactly as it was
+  (unless you changed that file yourself meanwhile; then it removes only parda's lines).
 - **Agents keep working.** The same value always gets the same stand-in, prompt caching keeps
   working, and real values come back into commands and file edits — even when a stand-in is split
   across two pieces of a streamed answer.
@@ -63,7 +64,8 @@ parda uninstall                    # put everything back
 | **Names** | Two or more words, English or Devanagari, using lists of given names, middle names and surnames — including Nepali |
 
 Known limits, stated plainly: single-word and lower-case names, addresses and dates of birth are
-not detected, and images, PDFs and audio pass through unchecked.
+not detected, and images, PDFs and audio pass through unchecked (text files sent inline are
+checked).
 [Full list and limits →](https://sundarshahi.github.io/parda/what-it-masks.html)
 
 ## Supported tools

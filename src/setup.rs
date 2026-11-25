@@ -13,6 +13,10 @@ use std::time::Duration;
 
 const MARK_START: &str = "# >>> parda >>>";
 const MARK_END: &str = "# <<< parda <<<";
+/// On the start marker when parda had to end the user's last line before its block; removed with it.
+const ADDED_NEWLINE: &str = " (newline added)";
+/// On the start marker when the file didn't exist before parda; uninstall deletes it if nothing else is in it.
+const CREATED: &str = " (file created)";
 #[cfg(target_os = "macos")]
 const SERVICE: &str = "dev.parda";
 pub const ANTHROPIC_DEFAULT: &str = "https://api.anthropic.com";
@@ -140,8 +144,29 @@ fn fish_file() -> Option<PathBuf> {
 
 fn strip_block(s: &str) -> String {
     match (s.find(MARK_START), s.find(MARK_END)) {
-        (Some(a), Some(b)) if b > a => s[..a].to_string() + s[b + MARK_END.len()..].trim_start_matches('\n'),
+        (Some(a), Some(b)) if b > a => {
+            let before = if s[a..].starts_with(&format!("{MARK_START}{ADDED_NEWLINE}")) {
+                s[..a].strip_suffix('\n').unwrap_or(&s[..a])
+            } else {
+                &s[..a]
+            };
+            let after = &s[b + MARK_END.len()..];
+            before.to_string() + after.strip_prefix("\r\n").or_else(|| after.strip_prefix('\n')).unwrap_or(after)
+        }
         _ => s.to_string(),
+    }
+}
+
+/// `text` with parda's block at the end. A last line without a newline is ended first (and the marker
+/// says so, so uninstall takes that newline away again).
+fn with_block(text: &str, block_body: &str, created: bool) -> String {
+    let text = strip_block(text);
+    if created && text.is_empty() {
+        format!("{MARK_START}{CREATED}\n{block_body}{MARK_END}\n")
+    } else if text.is_empty() || text.ends_with('\n') {
+        format!("{text}{MARK_START}\n{block_body}{MARK_END}\n")
+    } else {
+        format!("{text}\n{MARK_START}{ADDED_NEWLINE}\n{block_body}{MARK_END}\n")
     }
 }
 
@@ -171,7 +196,8 @@ fn claude_on(settings: &Path, previous: &Path, ours: &str) -> Result<Option<Stri
     }
     let old = v.pointer("/env/ANTHROPIC_BASE_URL").and_then(Value::as_str).map(str::to_string);
     if !previous.exists() && !old.as_deref().is_some_and(is_ours) {
-        write_json(previous, &json!({ "value": old }))?;
+        // The file's own text too, so uninstall can put it back byte for byte if nothing else changed.
+        write_json(previous, &json!({ "value": old, "text": text }))?;
     }
     if !v["env"].is_object() {
         v["env"] = json!({});
@@ -193,6 +219,7 @@ fn claude_off(settings: &Path, previous: &Path) -> Result<bool, String> {
     let old: Value =
         fs::read_to_string(previous).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({"value": null}));
     let env = v["env"].as_object_mut().expect("checked above");
+    let saved_text = old["text"].as_str();
     match old["value"].as_str() {
         Some(o) => {
             env.insert("ANTHROPIC_BASE_URL".into(), json!(o));
@@ -204,7 +231,14 @@ fn claude_off(settings: &Path, previous: &Path) -> Result<bool, String> {
             }
         }
     }
-    write_json(settings, &v)?;
+    // Unchanged since install apart from parda's line: the original text, formatting and all.
+    let same = saved_text
+        .and_then(|t| serde_json::from_str::<Value>(if t.trim().is_empty() { "{}" } else { t }).ok())
+        .is_some_and(|orig| orig == v);
+    match saved_text {
+        Some(t) if same => fs::write(settings, t).map_err(|e| format!("write {}: {e}", settings.display()))?,
+        _ => write_json(settings, &v)?,
+    }
     fs::remove_file(previous).ok();
     Ok(true)
 }
@@ -213,27 +247,34 @@ fn codex_config() -> PathBuf {
     std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".codex")).join("config.toml")
 }
 
+/// The user's own `openai_base_url` line, set aside in place while parda's is in force.
+const SET_ASIDE: &str = "# set aside by parda: ";
+
+/// A TOML string value: `"…"` or `'…'` up to its closing quote, or a bare word; comments dropped.
+fn toml_value(v: &str) -> String {
+    let v = v.trim();
+    match v.chars().next() {
+        Some(q @ ('"' | '\'')) => v[1..].split(q).next().unwrap_or("").to_string(),
+        _ => v.split(['#', ' ', '\t']).next().unwrap_or("").to_string(),
+    }
+}
+
 /// Codex reads its base URL from `config.toml`, not the shell. Puts a marked `openai_base_url` at the
-/// top (top-level keys must come before any `[table]`). An existing top-level `openai_base_url` line is
-/// moved into `previous` and its value returned, to become the upstream.
-fn codex_on(config: &Path, previous: &Path, ours: &str) -> Result<Option<String>, String> {
+/// top (top-level keys must come before any `[table]`). A top-level `openai_base_url` of the user's is
+/// commented out where it stands and its value returned, to become the upstream. Line endings are kept.
+fn codex_on(config: &Path, ours: &str) -> Result<Option<String>, String> {
     let text = strip_block(&read_existing(config)?);
-    let mut lines: Vec<&str> = text.lines().collect();
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut lines: Vec<String> = text.split_inclusive('\n').map(str::to_string).collect();
     let first_table = lines.iter().position(|l| l.trim_start().starts_with('[')).unwrap_or(lines.len());
     let mut old = None;
     if let Some(i) = (0..first_table).find(|&i| {
         lines[i].trim_start().strip_prefix("openai_base_url").is_some_and(|r| r.trim_start().starts_with('='))
     }) {
-        let line = lines.remove(i);
-        // A line outside parda's block is the user's latest choice: it replaces anything saved before.
-        fs::write(previous, format!("{line}\n")).map_err(|e| e.to_string())?;
-        old = line.split_once('=').map(|(_, v)| v.trim().trim_matches(['"', '\'']).to_string());
+        old = lines[i].split_once('=').map(|(_, v)| toml_value(v));
+        lines[i] = format!("{SET_ASIDE}{}", lines[i]);
     }
-    let mut out = format!("{MARK_START}\nopenai_base_url = \"{ours}\"\n{MARK_END}\n");
-    for l in lines {
-        out += l;
-        out.push('\n');
-    }
+    let out = format!("{MARK_START}{nl}openai_base_url = \"{ours}\"{nl}{MARK_END}{nl}") + &lines.concat();
     if let Some(p) = config.parent() {
         fs::create_dir_all(p).ok();
     }
@@ -244,10 +285,15 @@ fn codex_on(config: &Path, previous: &Path, ours: &str) -> Result<Option<String>
 /// Ok(true) when parda's line was removed, Ok(false) when there was none.
 fn codex_off(config: &Path, previous: &Path) -> Result<bool, String> {
     let text = read_existing(config)?;
-    if !text.contains(MARK_START) {
+    if !text.contains(MARK_START) && !text.contains(SET_ASIDE) {
         return Ok(false);
     }
-    let restored = read_existing(previous)? + &strip_block(&text);
+    let mut restored = strip_block(&text).replace(SET_ASIDE, "");
+    // parda 0.1 moved the user's line into `previous` instead of setting it aside.
+    let old = read_existing(previous)?;
+    if !old.is_empty() {
+        restored = old + &restored;
+    }
     fs::write(config, restored).map_err(|e| format!("couldn't write {}: {e}", config.display()))?;
     fs::remove_file(previous).ok();
     Ok(true)
@@ -286,7 +332,7 @@ pub fn install() -> Result<(), String> {
     let codex = codex_config();
     let mut codex_old = None;
     if codex.parent().is_some_and(Path::exists) {
-        match codex_on(&codex, &dir.join("codex-previous.toml"), &format!("{}/openai", base())) {
+        match codex_on(&codex, &format!("{}/openai", base())) {
             Ok(old) => {
                 codex_old = old;
                 println!("✓ Codex sends its requests through parda ({})", codex.display());
@@ -315,14 +361,18 @@ pub fn install() -> Result<(), String> {
     write_json(&dir.join("upstreams.json"), &Value::Object(upstreams))?;
 
     fs::write(dir.join("env.sh"), env_sh()).map_err(|e| e.to_string())?;
-    let line = format!("{MARK_START}\n[ -f \"{0}\" ] && . \"{0}\"\n{MARK_END}\n", dir.join("env.sh").display());
+    let source = format!("[ -f \"{0}\" ] && . \"{0}\"\n", dir.join("env.sh").display());
+    let by_hand = format!("{MARK_START}\n{source}{MARK_END}");
     for rc in rc_files() {
-        match read_existing(&rc) {
-            Ok(old) => {
-                fs::write(&rc, strip_block(&old) + &line).map_err(|e| format!("update {}: {e}", rc.display()))?;
-                println!("✓ new shells use parda ({})", rc.display());
-            }
-            Err(e) => println!("• {e}. Add this to it yourself:\n{line}"),
+        // A file that can't be read or written is reported and skipped; install carries on.
+        let created =
+            !rc.exists() || fs::read_to_string(&rc).is_ok_and(|t| t.contains(&format!("{MARK_START}{CREATED}")));
+        match read_existing(&rc).and_then(|old| {
+            fs::write(&rc, with_block(&old, &source, created))
+                .map_err(|e| format!("couldn't update {} ({e})", rc.display()))
+        }) {
+            Ok(()) => println!("✓ new shells use parda ({})", rc.display()),
+            Err(e) => println!("• {e}. Add this to it yourself:\n{by_hand}"),
         }
     }
     if let Some(f) = fish_file() {
@@ -347,6 +397,11 @@ pub fn uninstall() {
     }
     for rc in rc_files() {
         match read_existing(&rc) {
+            Ok(old) if old.contains(&format!("{MARK_START}{CREATED}")) && strip_block(&old).is_empty() => {
+                if fs::remove_file(&rc).is_ok() {
+                    println!("✓ removed {} (parda created it)", rc.display());
+                }
+            }
             Ok(old) if old.contains(MARK_START) => match fs::write(&rc, strip_block(&old)) {
                 Ok(()) => println!("✓ removed from {}", rc.display()),
                 Err(e) => println!(
@@ -390,7 +445,8 @@ pub fn running() -> bool {
         return false;
     };
     s.set_read_timeout(Some(Duration::from_secs(1))).ok();
-    if s.write_all(b"GET /parda/health HTTP/1.1\r\nhost: parda\r\nconnection: close\r\n\r\n").is_err() {
+    let req = format!("GET /parda/health HTTP/1.1\r\nhost: 127.0.0.1:{}\r\nconnection: close\r\n\r\n", port());
+    if s.write_all(req.as_bytes()).is_err() {
         return false;
     }
     let mut r = String::new();
@@ -533,11 +589,12 @@ mod tests {
 
     #[test]
     fn rc_block_is_replaced_not_duplicated_and_removed_exactly() {
-        let line = format!("{MARK_START}\n. x\n{MARK_END}\n");
-        let once = strip_block("export A=1\n") + &line;
-        let twice = strip_block(&once) + &line;
-        assert_eq!(once, twice);
-        assert_eq!(strip_block(&twice), "export A=1\n");
+        for original in ["export A=1\n", "export A=1", "", "a\r\nb\r\n"] {
+            let once = with_block(original, ". x\n", false);
+            assert_eq!(with_block(&once, ". x\n", false), once, "{original:?}");
+            assert!(once.contains(&format!("\n{MARK_START}")) || original.is_empty(), "block on its own line");
+            assert_eq!(strip_block(&once), original, "{original:?}");
+        }
     }
 
     #[test]
@@ -555,17 +612,21 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         let (c, p) = (d.join("config.toml"), d.join("previous.toml"));
         let ours = format!("{}/openai", base());
-        let original = "model = \"gpt-5\"\nopenai_base_url = \"https://gw.example.com/v1\"\n\n[profiles.x]\nopenai_base_url = \"keep\"\n";
+        let original = "model = \"gpt-5\"\r\nopenai_base_url = \"https://gw.example.com/v1\" # corp gateway\r\n\r\n[profiles.x]\r\nopenai_base_url = \"keep\"\r\n";
         fs::write(&c, original).unwrap();
-        assert_eq!(codex_on(&c, &p, &ours).unwrap().as_deref(), Some("https://gw.example.com/v1"));
+        assert_eq!(codex_on(&c, &ours).unwrap().as_deref(), Some("https://gw.example.com/v1"));
         let on = fs::read_to_string(&c).unwrap();
-        assert!(on.starts_with(&format!("{MARK_START}\nopenai_base_url = \"{ours}\"")));
-        assert_eq!(on.matches("openai_base_url").count(), 2, "one top-level key, the profile's stays");
-        assert_eq!(codex_on(&c, &p, &ours).unwrap(), None, "reinstall is a no-op");
+        assert!(on.starts_with(&format!("{MARK_START}\r\nopenai_base_url = \"{ours}\"\r\n")), "{on:?}");
+        assert!(!on.replace("\r\n", "").contains('\n'), "line endings kept: {on:?}");
+        assert_eq!(codex_on(&c, &ours).unwrap(), None, "reinstall is a no-op");
         assert!(codex_off(&c, &p).unwrap());
-        let back = fs::read_to_string(&c).unwrap();
-        assert!(back.contains("openai_base_url = \"https://gw.example.com/v1\"") && back.contains("[profiles.x]"));
-        assert!(!back.contains(MARK_START));
+        assert_eq!(fs::read_to_string(&c).unwrap(), original, "back exactly, the user's line where it was");
+
+        // A config from parda 0.1, which kept the user's line in `previous`.
+        fs::write(&c, format!("{MARK_START}\nopenai_base_url = \"{ours}\"\n{MARK_END}\nmodel = \"x\"\n")).unwrap();
+        fs::write(&p, "openai_base_url = \"https://gw.example.com/v1\"\n").unwrap();
+        assert!(codex_off(&c, &p).unwrap());
+        assert_eq!(fs::read_to_string(&c).unwrap(), "openai_base_url = \"https://gw.example.com/v1\"\nmodel = \"x\"\n");
         fs::remove_dir_all(&d).ok();
     }
 
@@ -594,7 +655,7 @@ mod tests {
         assert_eq!(fs::read(&s).unwrap(), b"{\"a\": \"caf\xe9\"}", "unreadable settings are left alone");
         let toml = d.join("latin1.toml");
         fs::write(&toml, b"model = \"caf\xe9\"\n").unwrap();
-        assert!(codex_on(&toml, &d.join("prev2.toml"), &ours).is_err());
+        assert!(codex_on(&toml, &ours).is_err());
         assert_eq!(fs::read(&toml).unwrap(), b"model = \"caf\xe9\"\n");
 
         fs::write(&s, "{ not json").unwrap();

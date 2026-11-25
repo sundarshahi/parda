@@ -3,7 +3,9 @@
 //! Only string values are touched, never keys. Structural and signed fields are skipped in both
 //! directions: changing a thinking block or its signature breaks the next request.
 
-use crate::vault::{Counts, Vault};
+use crate::detect::{self, Kind};
+use crate::vault::{self, Counts, Vault};
+use base64::Engine;
 use serde_json::Value;
 
 /// Structural fields: never masked or restored, nor anything inside them — except inside a tool's
@@ -64,7 +66,6 @@ fn skipped(key: &str, parent_type: &str, parent_key: &str, in_tool_input: bool) 
         "data" => {
             matches!(parent_type, "base64" | "redacted_thinking") || matches!(parent_key, "inlineData" | "inline_data")
         }
-        "file_data" => true,
         _ => SKIP.contains(&key),
     }
 }
@@ -129,13 +130,28 @@ fn walk(
     }
 }
 
-/// An inline file or image (`data:image/png;base64,…`): not text, never scanned.
-fn is_data_url(s: &str) -> bool {
-    s.strip_prefix("data:").and_then(|r| r.split_once(";base64,")).is_some_and(|(mime, b64)| {
+/// An inline file (`data:image/png;base64,…`): (media type, base64 data).
+fn data_url(s: &str) -> Option<(&str, &str)> {
+    s.strip_prefix("data:").and_then(|r| r.split_once(";base64,")).filter(|(mime, b64)| {
         mime.contains('/')
             && mime.bytes().all(|c| c.is_ascii_alphanumeric() || b"/.+-".contains(&c))
             && !b64.bytes().any(|c| c.is_ascii_whitespace())
     })
+}
+
+/// A text file sent inline (`text/*`, JSON, XML, YAML, CSV) is decoded, masked and encoded again.
+/// Images, PDFs and audio aren't text and pass unscanned.
+fn mask_data_url(vault: &Vault, s: &str, counts: &mut Counts) -> Option<String> {
+    let (mime, b64) = data_url(s)?;
+    let text_like = mime.starts_with("text/")
+        || ["json", "xml", "yaml", "csv", "javascript", "x-sh", "toml"].iter().any(|t| mime.contains(t));
+    if !text_like {
+        return None;
+    }
+    let engine = base64::engine::general_purpose::STANDARD;
+    let text = String::from_utf8(engine.decode(b64).ok()?).ok()?;
+    let masked = vault.mask(&text, counts)?;
+    Some(format!("data:{mime};base64,{}", engine.encode(masked)))
 }
 
 /// Told to the model whenever a request carries stand-ins. Without it, models treat stand-ins as
@@ -189,19 +205,28 @@ fn add_note(v: &mut Value, api: Api) {
 
 /// Masks every string in a JSON request body. Err when the body isn't JSON (it can't be scanned,
 /// so it must not be sent).
-pub fn mask_request(vault: &Vault, body: &[u8], counts: &mut Counts, api: Api) -> Result<Vec<u8>, String> {
+/// `note`: the request asks the model for an answer (chat, messages, responses, generateContent), so
+/// the model is told about stand-ins. Other requests (embeddings, token counts) take no extra fields.
+pub fn mask_request(vault: &Vault, body: &[u8], counts: &mut Counts, api: Api, note: bool) -> Result<Vec<u8>, String> {
     let mut v: Value = serde_json::from_slice(body).map_err(|e| format!("the request body isn't JSON ({e})"))?;
     let mut changed = false;
-    visit(&mut v, &mut |s, _| {
-        if is_data_url(s) {
-            return;
-        }
-        if let Some(m) = vault.mask(s, counts) {
+    visit(&mut v, &mut |s, leaf| {
+        let masked = if data_url(s).is_some() {
+            mask_data_url(vault, s, counts)
+        } else if leaf.key == "file_data" {
+            None // base64 without a data: prefix: not text
+        } else if detect::secret_setting(leaf.key, s) && !vault::token_re().is_match(s) {
+            // `{"DB_PASSWORD": "…"}`: the name is the key, so no rule sees name and value together
+            Some(vault.mask_as(Kind::Secret, s, counts))
+        } else {
+            vault.mask(s, counts)
+        };
+        if let Some(m) = masked {
             *s = m;
             changed = true;
         }
     });
-    if changed {
+    if changed && note {
         add_note(&mut v, api);
     }
     // Always the re-written body, never the original bytes: a duplicate key that parsing dropped
@@ -234,7 +259,8 @@ mod tests {
             {"type": "text", "text": "mail ram@example.com"},
             {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AKIAIOSFODNN7EXAMPLE"}}
         ]}], "max_tokens": 5});
-        let out = mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Anthropic).unwrap();
+        let out =
+            mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Anthropic, true).unwrap();
         let s = String::from_utf8(out).unwrap();
         assert!(!s.contains("ram@example.com"));
         assert!(s.contains("AKIAIOSFODNN7EXAMPLE"), "image data untouched");
@@ -248,7 +274,8 @@ mod tests {
         let block =
             json!({"type": "thinking", "thinking": "Ram Thapa ram@example.com", "signature": "sig ram@example.com"});
         let body = json!({"messages": [{"role": "assistant", "content": [block.clone()]}]});
-        let out = mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Anthropic).unwrap();
+        let out =
+            mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Anthropic, true).unwrap();
         let back: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(back["messages"][0]["content"][0], block);
     }
@@ -263,7 +290,7 @@ mod tests {
             {"type": "image", "source": {"type": "url", "url": "data:image/png;base64,QUtJQUlPU0ZPRE5ON0VYQU1QTEU="}}
         ]}]});
         let out = String::from_utf8(
-            mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Anthropic).unwrap(),
+            mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Anthropic, true).unwrap(),
         )
         .unwrap();
         assert!(!out.contains("AKIAIOSFODNN7EXAMPLE") && !out.contains("ram@example.com"), "{out}");
@@ -277,6 +304,7 @@ mod tests {
             br#"{"system":"AKIAIOSFODNN7EXAMPLE","system":"hi"}"#,
             &mut Counts::new(),
             Api::Anthropic,
+            true,
         )
         .unwrap();
         assert!(!String::from_utf8(out).unwrap().contains("AKIA"));
@@ -284,14 +312,14 @@ mod tests {
 
     #[test]
     fn not_json_is_refused() {
-        assert!(mask_request(&vault(), b"name=Ram Thapa", &mut Counts::new(), Api::Anthropic).is_err());
+        assert!(mask_request(&vault(), b"name=Ram Thapa", &mut Counts::new(), Api::Anthropic, true).is_err());
     }
 
     #[test]
     fn the_model_is_told_about_stand_ins_only_when_there_are_some() {
         let v = vault();
         let mask = |b: Value, api| {
-            let out = mask_request(&v, &serde_json::to_vec(&b).unwrap(), &mut Counts::new(), api).unwrap();
+            let out = mask_request(&v, &serde_json::to_vec(&b).unwrap(), &mut Counts::new(), api, true).unwrap();
             serde_json::from_slice::<Value>(&out).unwrap()
         };
         let pii = "I am ram@example.com";
@@ -333,7 +361,7 @@ mod tests {
         // Gemini CLI signed in with Google wraps the API request in `request`.
         let body = json!({"model": "gemini-2.5-pro", "project": "p", "request": {"contents": contents,
             "systemInstruction": {"role": "user", "parts": [{"text": "You are a CLI."}]}}});
-        let out = mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Gemini).unwrap();
+        let out = mask_request(&v, &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Gemini, true).unwrap();
         let back: Value = serde_json::from_slice(&out).unwrap();
         let r = &back["request"];
         assert_eq!(r["contents"][0]["parts"][1]["inlineData"]["data"], "AKIAIOSFODNN7EXAMPLE", "media untouched");
@@ -348,9 +376,42 @@ mod tests {
         assert!(back.get("systemInstruction").is_none(), "the note goes inside `request`");
 
         let plain = json!({"contents": [{"role": "user", "parts": [{"text": "I am Sita Sharma"}]}]});
-        let out = mask_request(&v, &serde_json::to_vec(&plain).unwrap(), &mut Counts::new(), Api::Gemini).unwrap();
+        let out =
+            mask_request(&v, &serde_json::to_vec(&plain).unwrap(), &mut Counts::new(), Api::Gemini, true).unwrap();
         let back: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(back["systemInstruction"], json!({"parts": [{"text": NOTE}]}));
+    }
+
+    #[test]
+    fn secret_named_keys_text_files_and_big_numbers() {
+        let v = vault();
+        let engine = base64::engine::general_purpose::STANDARD;
+        let env_file = format!("data:text/plain;base64,{}", engine.encode("DB_PASSWORD=hunter55xyz\n"));
+        let png = format!("data:image/png;base64,{}", engine.encode("DB_PASSWORD=hunter55xyz"));
+        let body = format!(
+            r#"{{"tools_input": {{"env": {{"DB_PASSWORD": "hunter66xyz", "apiKey": "k9x8c7v6b5n4m3"}}}},
+                "file": {{"file_data": "{env_file}"}}, "image": "{png}", "seed": 123456789012345678901234,
+                "secret_name": "prod-db-credentials"}}"#
+        );
+        let out = String::from_utf8(mask_request(&v, body.as_bytes(), &mut Counts::new(), Api::OpenAi, true).unwrap())
+            .unwrap();
+        assert!(!out.contains("hunter66xyz") && !out.contains("k9x8c7v6b5n4m3"), "{out}");
+        let back: Value = serde_json::from_str(&out).unwrap();
+        let file = back["file"]["file_data"].as_str().unwrap();
+        let text = String::from_utf8(engine.decode(file.split_once(",").unwrap().1).unwrap()).unwrap();
+        assert!(text.starts_with("DB_PASSWORD=[SECRET_"), "text files are masked inside: {text}");
+        assert_eq!(back["image"], png, "images pass unscanned");
+        assert!(out.contains("123456789012345678901234"), "big numbers keep every digit: {out}");
+        assert_eq!(back["secret_name"], "prod-db-credentials");
+    }
+
+    #[test]
+    fn no_note_where_the_api_takes_no_instructions() {
+        let body = br#"{"model": "text-embedding-3-small", "input": "ram@example.com"}"#;
+        let out = mask_request(&vault(), body, &mut Counts::new(), Api::OpenAi, false).unwrap();
+        let back: Value = serde_json::from_slice(&out).unwrap();
+        assert!(back.get("instructions").is_none());
+        assert!(!back["input"].as_str().unwrap().contains("ram@"));
     }
 
     #[test]

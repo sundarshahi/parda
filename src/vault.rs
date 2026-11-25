@@ -4,13 +4,14 @@
 //! (prompt caching keeps working; the AI can tell one person from two) and nobody without the key can
 //! work backwards. The vault lives only in memory and is gone when parda stops.
 
-use crate::detect::{self, Kind};
+use crate::detect::{self, Find, Kind};
+use aho_corasick::{AhoCorasick, MatchKind};
 use regex::Regex;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub type Counts = BTreeMap<&'static str, u64>;
 
@@ -29,10 +30,23 @@ pub fn token_re() -> &'static Regex {
     })
 }
 
+/// Values shorter than this aren't searched for on their own: too likely to be ordinary text.
+const MIN_KNOWN: usize = 4;
+
 #[derive(Default)]
 struct Tables {
     now: HashMap<String, String>,
     previous: HashMap<String, String>,
+    /// Every real value in the tables, to find it again anywhere (built when first needed).
+    known: Option<Arc<(AhoCorasick, Vec<Kind>)>>,
+}
+
+fn kind_of(token: &str) -> Kind {
+    let label = token.trim_start_matches('[').split('_').next().unwrap_or("");
+    [Kind::Secret, Kind::Person, Kind::Phone, Kind::Card, Kind::Iban, Kind::Ssn, Kind::Ip, Kind::Id]
+        .into_iter()
+        .find(|k| k.label() == label)
+        .unwrap_or(Kind::Email)
 }
 
 impl Tables {
@@ -83,6 +97,7 @@ impl Vault {
         let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
         if map.now.len() >= MAX_ENTRIES {
             map.previous = std::mem::take(&mut map.now);
+            map.known = None;
         }
         for len in [8, 12, 16] {
             let t = match kind {
@@ -91,8 +106,10 @@ impl Vault {
             };
             match map.get(&t) {
                 Some(v) if v != value => continue, // collision: try a longer stand-in
-                _ => {
+                Some(_) => return t,
+                None => {
                     map.now.insert(t.clone(), value.to_string());
+                    map.known = None;
                     return t;
                 }
             }
@@ -100,9 +117,36 @@ impl Vault {
         unreachable!("three BLAKE3 prefixes collided")
     }
 
-    /// Replaces every find with its stand-in. `None` when there was nothing to mask.
+    /// Where values masked before appear in `text`. A value often comes back without what made it
+    /// detectable: the model writes the restored password into a command, and the next request
+    /// carries that command without the `DB_PASSWORD=` it was found by.
+    fn known_finds(&self, text: &str) -> Vec<Find> {
+        let known = {
+            let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+            if map.known.is_none() {
+                let (values, kinds): (Vec<&String>, Vec<Kind>) = map
+                    .now
+                    .iter()
+                    .chain(map.previous.iter())
+                    .filter(|(_, v)| v.len() >= MIN_KNOWN)
+                    .map(|(t, v)| (v, kind_of(t)))
+                    .unzip();
+                let ac = AhoCorasick::builder().match_kind(MatchKind::LeftmostLongest).build(values);
+                map.known = ac.ok().map(|ac| Arc::new((ac, kinds)));
+            }
+            map.known.clone()
+        };
+        let Some(known) = known else { return Vec::new() };
+        let (ac, kinds) = &*known;
+        ac.find_iter(text)
+            .map(|m| Find { start: m.start(), end: m.end(), kind: kinds[m.pattern().as_usize()] })
+            .collect()
+    }
+
+    /// Replaces every find, and every value masked before, with its stand-in. `None` when there was
+    /// nothing to mask.
     pub fn mask(&self, text: &str, counts: &mut Counts) -> Option<String> {
-        let finds = detect::scan(text);
+        let finds = detect::scan_with(text, self.known_finds(text));
         if finds.is_empty() {
             return None;
         }
@@ -116,6 +160,12 @@ impl Vault {
         }
         out.push_str(&text[at..]);
         Some(out)
+    }
+
+    /// The stand-in for a whole value already known to be `kind` (a JSON field named like a secret).
+    pub fn mask_as(&self, kind: Kind, value: &str, counts: &mut Counts) -> String {
+        *counts.entry(kind.label()).or_default() += 1;
+        self.stand_in(kind, value)
     }
 
     /// Puts real values back. `json_escape` for text that is itself JSON source (tool-call arguments).
@@ -194,6 +244,19 @@ mod tests {
         assert_eq!(n, 2);
         let other = Vault::new([8; 32]).mask(text, &mut Counts::new()).unwrap();
         assert_ne!(ma, other, "a different key gives different stand-ins");
+    }
+
+    #[test]
+    fn a_value_masked_once_is_masked_wherever_it_comes_back() {
+        let v = Vault::new([6; 32]);
+        let first = v.mask("DB_PASSWORD=hunter22xyz", &mut Counts::new()).unwrap();
+        let token = first.strip_prefix("DB_PASSWORD=").unwrap().to_string();
+        // the restored value, back in the next request without the setting name around it
+        let mut c = Counts::new();
+        let again = v.mask("Your password is hunter22xyz; mysql -u app -phunter22xyz", &mut c).unwrap();
+        assert_eq!(again, format!("Your password is {token}; mysql -u app -p{token}"));
+        assert_eq!(c.get("SECRET"), Some(&2));
+        assert_eq!(v.mask("nothing known here", &mut Counts::new()), None);
     }
 
     #[test]

@@ -1,11 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-25
 
 - Gemini CLI and apps using Google's Gen AI SDK: `install` sets `GOOGLE_GEMINI_BASE_URL` and
   `CODE_ASSIST_ENDPOINT`; Gemini requests and streamed answers are masked and restored (media,
   signatures and thought summaries handled).
 - GitHub Copilot CLI and VS Code chat with your own Anthropic or OpenAI key: documented setup.
+
+Fixed (found by an independent audit):
+
+- A value masked once is now masked wherever it comes back, so a password the model wrote into a
+  command can't leave unmasked in the next request.
+- Secrets under JSON keys named like secrets (`{"DB_PASSWORD": "…"}`), `.env` text inside JSON strings,
+  URL passwords with no user or with a `/`, every address in a list of IPs, and card numbers next to
+  other digits are now masked.
+- Fewer false finds: `PWD=`, names about secrets (`secret_name`, `password_reset_url`), numbers that
+  pass Luhn but belong to no card brand. Big numbers keep every digit.
+- A stand-in split around a keep-alive (`ping`, SSE comment) is now restored.
+- The local port refuses web pages (`Origin`, `Sec-Fetch-Site`, foreign `Host`); idle connections time
+  out; connections, request lines and headers are capped.
+- Percent-encoded data in the URL is refused like plain data.
+- Text files sent inline are checked.
+- The note to the model is added only to requests that ask it for an answer (not embeddings or token
+  counts).
+- Install: a startup file without a final newline stays valid; Codex config keeps comments, line
+  endings and the user's line in place; a startup file that can't be written is reported and skipped.
+- Uninstall: Claude Code settings come back byte for byte; startup files parda created are removed.
 
 ## 0.1.0 — 2026-11-22
 

@@ -95,16 +95,16 @@ fn rules() -> &'static [Rule] {
             // curl -u user:password / --user user:password
             rule(Secret, r"\bcurl\b[^\n]*?\s(?:-u|--user)[ =][\x22']?[^\s:\x22']+:([^\s\x22']{3,})", 1, not_placeholder),
             // Password inside a URL: scheme://user:PASSWORD@host
-            rule(Secret, r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@]+:([^\s@/]+)@", 1, not_placeholder),
+            rule(Secret, r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@]*:([^\s@?#]+)@", 1, url_password),
             // Settings whose name says secret: KEY=value lines (.env, shell, YAML) and quoted values
             // anywhere (JSON, code, config). The name and value are judged in `secret_setting`.
             // (`#` starts a comment only after a space, so it can be part of a value.)
-            setting(r"(?m)^[ \t]*(?:export[ \t]+)?([A-Za-z][A-Za-z0-9_.\-]*)[ \t]*[=:][ \t]*[\x22']?([^\s\x22',;]{4,})"),
+            setting(r#"(?m)(?:^|\\[nr])[ \t]*(?:export[ \t]+)?([A-Za-z][A-Za-z0-9_.\-]*)[ \t]*[=:][ \t]*(?:\\?[\x22'])?((?:[^\s\x22',;\\]|\\[^nrt\x22]){4,})"#),
             // Quoted values may hold spaces: "correct horse battery staple".
-            setting(r"[\x22']?([A-Za-z][A-Za-z0-9_.\-]*)[\x22']?\s*(?::|=|=>)\s*\x22([^\x22\n]{4,})\x22"),
+            setting(r"\\?[\x22']?([A-Za-z][A-Za-z0-9_.\-]*)\\?[\x22']?\s*(?::|=|=>)\s*\\?\x22((?:[^\x22\n\\]|\\[^\x22nrt]){4,})\\?\x22"),
             setting(r"[\x22']?([A-Za-z][A-Za-z0-9_.\-]*)[\x22']?\s*(?::|=|=>)\s*'([^'\n]{4,})'"),
             // NAME=value mid-line: prose, `PGPASSWORD=… psql`, `curl -u`. Trailing punctuation isn't part of it.
-            setting(r"(?:^|[\s;&|(])([A-Za-z][A-Za-z0-9_]*)=([^\s\x22'#,;&|)]{3,}[^\s\x22'#,;&|).:!?])"),
+            setting(r"(?:^|[\s;&|(]|\\[nrt])([A-Za-z][A-Za-z0-9_]*)=((?:[^\s\x22'#,;&|)\\]|\\[^nrt\x22]){3,}[^\s\x22'#,;&|).:!?\\])"),
             // Personal data.
             rule(Email, r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}\b", 0, |v| {
                 !v.ends_with("@parda.invalid")
@@ -112,10 +112,8 @@ fn rules() -> &'static [Rule] {
             rule(Phone, r"(?-u)\+\d[\d \-().]{6,18}\d", 0, |v| (8..=15).contains(&digits(v).len())),
             rule(Phone, r"(?-u)\b9[678]\d{8}\b", 0, any),
             rule(Phone, r"(?-u)\(\d{3}\) ?\d{3}-\d{4}\b|\b\d{3}-\d{3}-\d{4}\b|\b0\d{1,2}-\d{6,7}\b", 0, any),
-            rule(Card, r"(?-u)\b(?:\d[ \-]?){12,18}\d\b", 0, card),
             rule(Iban, r"(?-u)\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b", 0, iban),
             rule(Ssn, r"(?-u)\b(\d{3})-(\d{2})-(\d{4})\b", 0, ssn),
-            rule(Ip, r"(?:^|[^\w.])((?:\d{1,3}\.){3}\d{1,3})(?:$|[^\w.]|\.(?:$|\D))", 1, public_ip),
             // ID numbers next to a label, in English or Nepali, with ASCII or Devanagari digits.
             // `(?-u)` / ASCII classes keep the fast engine: Unicode \b and \d are ~100× slower here.
             rule(
@@ -132,6 +130,12 @@ fn digits(s: &str) -> String {
     s.chars().filter(char::is_ascii_digit).collect()
 }
 
+/// A URL password, not a port and path (`https://host:8080/a@b`).
+fn url_password(v: &str) -> bool {
+    let port = v.bytes().take_while(u8::is_ascii_digit).count();
+    not_placeholder(v) && !(port > 0 && (port == v.len() || v.as_bytes()[port] == b'/'))
+}
+
 fn not_placeholder(v: &str) -> bool {
     !(v.starts_with("${") || v.starts_with('<') || v.starts_with('{') || v.chars().all(|c| c == '*' || c == 'x'))
 }
@@ -143,6 +147,12 @@ const STRONG_WHOLE: [&str; 3] = ["pass", "pwd", "passcode"];
 /// Words that usually mean a secret, but also name ordinary things (`primary_key`, `auth: true`): the
 /// value must also look random.
 const WEAK: [&str; 8] = ["key", "apikey", "token", "auth", "accesskey", "privatekey", "authtoken", "accesstoken"];
+/// A name ending in one of these names something about a secret, not the secret itself
+/// (`secret_name`, `password_reset_url`, `credentials_file`).
+const ABOUT: [&str; 21] = [
+    "name", "names", "url", "uri", "path", "file", "dir", "id", "arn", "ref", "length", "len", "min", "max", "policy",
+    "type", "field", "label", "hint", "prompt", "pattern",
+];
 
 /// Splits `DB_PASSWORD`, `api-key`, `clientSecret`, `Co-Authored-By` into lowercase words.
 fn name_words(name: &str) -> Vec<String> {
@@ -164,8 +174,13 @@ fn name_words(name: &str) -> Vec<String> {
     words
 }
 
-fn secret_setting(name: &str, value: &str) -> bool {
+/// Whether `value`, set under `name` (a `KEY=value` line, a JSON key), is a secret.
+pub fn secret_setting(name: &str, value: &str) -> bool {
     let words = name_words(name);
+    // `PWD` / `OLDPWD` are the shell's working directory.
+    if words.last().is_some_and(|w| ABOUT.contains(&w.as_str())) || matches!(name, "PWD" | "OLDPWD") {
+        return false;
+    }
     let strong = words.iter().any(|w| STRONG.iter().any(|s| w.contains(s)) || STRONG_WHOLE.contains(&w.as_str()));
     let weak = words.iter().any(|w| WEAK.contains(&w.as_str()));
     let plain = not_placeholder(value)
@@ -204,9 +219,83 @@ fn luhn(d: &str) -> bool {
     sum % 10 == 0
 }
 
-fn card(v: &str) -> bool {
-    let d = digits(v);
-    (13..=19).contains(&d.len()) && matches!(d.as_bytes()[0], b'2'..=b'6') && luhn(&d)
+/// A card number: a known brand prefix with that brand's lengths, and a valid Luhn check.
+fn card(d: &str) -> bool {
+    let n = d.len();
+    if !(13..=19).contains(&n) || !d.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let p = |k: usize| d[..k].parse::<u32>().unwrap_or(0);
+    let brand = match d.as_bytes()[0] {
+        b'4' => matches!(n, 13 | 16 | 19),
+        b'5' => (51..=55).contains(&p(2)) && n == 16,
+        b'2' => (2221..=2720).contains(&p(4)) && n == 16,
+        b'3' => {
+            (matches!(p(2), 34 | 37) && n == 15)
+                || (p(2) == 35 && n >= 16)
+                || ((matches!(p(2), 36 | 38) || (300..=305).contains(&p(3))) && n >= 14)
+        }
+        b'6' => (p(4) == 6011 || matches!(p(2), 62 | 65) || (644..=649).contains(&p(3))) && n >= 16,
+        _ => false,
+    };
+    brand && luhn(d)
+}
+
+/// Card numbers, also when other digits sit next to them (`4111 1111 1111 1111 123`, a CVV or a
+/// quantity): runs of digit groups are tried whole, then as consecutive groups.
+fn card_finds(text: &str, out: &mut Vec<Find>) {
+    static RUN: OnceLock<Regex> = OnceLock::new();
+    let run = RUN.get_or_init(|| Regex::new(r"(?-u)\b\d+(?:[ \-]\d+)*\b").unwrap());
+    for m in run.find_iter(text) {
+        // (start, end) of each digit group, as byte offsets in `text`
+        let mut groups: Vec<(usize, usize)> = Vec::new();
+        for (i, c) in m.as_str().bytes().enumerate() {
+            let at = m.start() + i;
+            match (c.is_ascii_digit(), groups.last_mut()) {
+                (true, Some(g)) if g.1 == at => g.1 = at + 1,
+                (true, _) => groups.push((at, at + 1)),
+                _ => {}
+            }
+        }
+        let mut i = 0;
+        while i < groups.len() {
+            let mut hit = None;
+            for j in (i..groups.len()).rev() {
+                let d: String = groups[i..=j].iter().map(|&(a, b)| &text[a..b]).collect();
+                if d.len() > 19 {
+                    continue;
+                }
+                if card(&d) {
+                    hit = Some(j);
+                    break;
+                }
+            }
+            match hit {
+                Some(j) => {
+                    out.push(Find { start: groups[i].0, end: groups[j].1, kind: Kind::Card });
+                    i = j + 1;
+                }
+                None => i += 1,
+            }
+        }
+    }
+}
+
+/// Public IPv4 addresses. Not part of a longer dotted run (`1.2.3.4.5` is a version).
+fn ip_finds(text: &str, out: &mut Vec<Find>) {
+    static IP: OnceLock<Regex> = OnceLock::new();
+    let ip = IP.get_or_init(|| Regex::new(r"(?-u)\d{1,3}(?:\.\d{1,3}){3}").unwrap());
+    let b = text.as_bytes();
+    for m in ip.find_iter(text) {
+        let before = m.start().checked_sub(1).map(|i| b[i]);
+        let after = b.get(m.end()).copied();
+        let after2 = b.get(m.end() + 1).copied();
+        let word = |c: Option<u8>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_');
+        let joined = before == Some(b'.') || word(before) || word(after) || (after == Some(b'.') && word(after2));
+        if !joined && public_ip(m.as_str()) {
+            out.push(Find { start: m.start(), end: m.end(), kind: Kind::Ip });
+        }
+    }
 }
 
 fn iban(v: &str) -> bool {
@@ -253,7 +342,11 @@ pub fn warm_up() {
 /// Every find in `text`, sorted, non-overlapping (earliest start wins, then secrets, then the longest).
 /// Stand-ins parda already wrote are never found again.
 pub fn scan(text: &str) -> Vec<Find> {
-    let mut all = Vec::new();
+    scan_with(text, Vec::new())
+}
+
+/// `scan`, plus finds the caller already has (values masked before, wherever they appear now).
+pub fn scan_with(text: &str, mut all: Vec<Find>) -> Vec<Find> {
     for r in rules() {
         for c in r.re.captures_iter(text) {
             if let Some(m) = c.get(r.group) {
@@ -265,6 +358,8 @@ pub fn scan(text: &str) -> Vec<Find> {
             }
         }
     }
+    card_finds(text, &mut all);
+    ip_finds(text, &mut all);
     all.extend(names::scan(text));
     let tokens: Vec<_> = crate::vault::token_re().find_iter(text).map(|m| (m.start(), m.end())).collect();
     all.retain(|f| !tokens.iter().any(|&(s, e)| f.start < e && s < f.end));
@@ -369,6 +464,36 @@ mod tests {
         none("ssn 000-12-3456");
         none("version v1.2.3.4 and 1.2.3.4.5");
         none("@types/node and pkg@1.2.3");
+    }
+
+    #[test]
+    fn audit_misses_now_found() {
+        // every address in a list, not every other one
+        let ips = found("dns 8.8.8.8 1.1.1.1 9.9.9.9; 52.1.2.3,52.1.2.4");
+        assert_eq!(ips.iter().filter(|(k, _)| *k == Kind::Ip).count(), 5, "{ips:?}");
+        // a card next to a CVV, an expiry or a quantity
+        one("4111 1111 1111 1111 123", Kind::Card, "4111 1111 1111 1111");
+        one("card 4111 1111 1111 1111 12/27", Kind::Card, "4111 1111 1111 1111");
+        one("qty 2 4111 1111 1111 1111", Kind::Card, "4111 1111 1111 1111");
+        one("4111111111111111", Kind::Card, "4111111111111111");
+        // URL passwords with no user, or with a slash
+        one("redis://:s3cr3tpass99@localhost:6379", Kind::Secret, "s3cr3tpass99");
+        one("postgres://app:Xy7/kL9pQ2@db.internal:5432/app", Kind::Secret, "Xy7/kL9pQ2");
+        // a .env or JSON written inside a JSON string (literal \n and \")
+        one(r"DB_HOST=db\nDB_PASSWORD=hunter33xyz\nDB_PORT=5432", Kind::Secret, "hunter33xyz");
+        one(r#"{\"password\":\"hunter44xyz\"}"#, Kind::Secret, "hunter44xyz");
+        one(r"echo x\nexport API_TOKEN=abc123def456ghi", Kind::Secret, "abc123def456ghi");
+    }
+
+    #[test]
+    fn audit_false_finds_gone() {
+        none("PWD=/home/ram/project");
+        none(r#"secret_name: "prod-db-credentials""#);
+        none(r#"password_reset_url: "/accounts/reset""#);
+        none("https://example.com:8080/users/@me");
+        none("order 1234567812345670 shipped"); // Luhn-valid, but no card brand starts with 1
+        none("id 9012345678901234");
+        none("build 1.2.3.4.5 from 10.0.0.1");
     }
 
     #[test]

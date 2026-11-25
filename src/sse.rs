@@ -125,6 +125,15 @@ impl<'a> SseRestorer<'a> {
             }
         }
         let parsed = (!data.is_empty()).then(|| serde_json::from_str::<Value>(&data.join("\n")).ok()).flatten();
+        // Keep-alives (a comment line, an event with no data, Anthropic's `ping`) carry nothing to
+        // restore and don't end a block: they go out now and what is held stays held.
+        let keep_alive =
+            data.is_empty() || parsed.as_ref().is_some_and(|v| v.get("type").and_then(Value::as_str) == Some("ping"));
+        if keep_alive {
+            out.extend_from_slice(raw.as_bytes());
+            out.extend_from_slice(delim.as_bytes());
+            return;
+        }
         let Some(mut v) = parsed else {
             self.release(out, &[], false);
             self.send_waiting(out);
@@ -361,6 +370,26 @@ mod tests {
         assert_eq!(thought, "thinking [");
         assert!(out.find("thinking").unwrap() < out.find("Hello").unwrap(), "order kept");
         assert_eq!(r.restored, 1);
+    }
+
+    #[test]
+    fn keep_alives_inside_a_split_stand_in() {
+        let (v, tok) = setup();
+        let (a, b) = tok.split_at(5);
+        let ev = |t: &str| {
+            let d = serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}});
+            format!("event: content_block_delta\ndata: {d}\n\n")
+        };
+        let mut r = SseRestorer::new(&v);
+        let mut out = r.feed(ev(&format!("Hi {a}")).as_bytes());
+        out.extend(r.feed(b"event: ping\ndata: {\"type\": \"ping\"}\n\n"));
+        out.extend(r.feed(b": keep-alive\n\n"));
+        out.extend(r.feed(ev(&format!("{b} ok")).as_bytes()));
+        out.extend(r.finish());
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(texts(&out, "/delta/text"), "Hi Ram Bahadur Thapa ok");
+        assert_eq!(out.matches("ping").count(), 2, "the ping passes through once");
+        assert!(out.contains(": keep-alive\n\n"));
     }
 
     #[test]

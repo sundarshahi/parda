@@ -61,7 +61,8 @@
 <li><strong>Single-word names</strong> ("ask Sita") and <strong>lower-case names</strong> are not masked. Too many ordinary words would be caught in code.</li>
 <li><strong>Names not on the lists</strong>, where neither the first nor the last word is known, are missed.</li>
 <li><strong>Addresses, dates of birth and free-text descriptions</strong> of a person are not detected.</li>
-<li><strong>Images, PDFs and audio</strong> inside a request are passed through without being checked.</li>
+<li><strong>Images, PDFs and audio</strong> inside a request are passed through without being checked. Text files sent inline (plain text, JSON, CSV, YAML, XML) are decoded, checked and masked.</li>
+<li><strong>Phone numbers run together with other digits</strong> may be missed.</li>
 <li>Some ordinary words that are also surnames (for example अधिकारी, "officer") are masked when they follow another word. That's the "when unsure, mask" rule: the AI sees a stand-in and your answer has the real word back.</li>
 </ul>
 <p>Found a miss or a false find? <a href="https://github.com/sundarshahi/parda/issues/new?template=detection.yml">Report it</a> with a made-up example — never paste the real data.</p>

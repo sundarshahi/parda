@@ -125,7 +125,10 @@ fn echo_split_gemini(body: &str) -> (String, String) {
 
 fn post(port: u16, path: &str, headers: &[(&str, &str)], body: &[u8]) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    let mut req = format!("POST {path} HTTP/1.1\r\nhost: x\r\nconnection: close\r\ncontent-length: {}\r\n", body.len());
+    let mut req = format!("POST {path} HTTP/1.1\r\nconnection: close\r\ncontent-length: {}\r\n", body.len());
+    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+        req += &format!("host: 127.0.0.1:{port}\r\n");
+    }
     for (k, v) in headers {
         req += &format!("{k}: {v}\r\n");
     }
@@ -259,6 +262,8 @@ fn refuses_unscannable_bodies() {
     assert!(form.1.contains("parda_error"));
     let q = post(p.port, "/openai/responses?user=ram@example.com", &[("content-type", "application/json")], b"{}");
     assert_eq!(q.0, 400, "data in the URL is refused");
+    let q = post(p.port, "/openai/responses?user=ram%40example.com", &[("content-type", "application/json")], b"{}");
+    assert_eq!(q.0, 400, "encoded data in the URL is refused too");
     let ws = post(p.port, "/openai/responses", &[("upgrade", "websocket"), ("connection", "upgrade")], b"");
     assert_eq!(ws.0, 426, "Codex falls back to HTTPS only on 426");
     assert!(seen.recv_timeout(Duration::from_millis(300)).is_err(), "nothing may reach the provider");
@@ -269,9 +274,43 @@ fn a_hostile_chunk_size_drops_one_connection_not_the_proxy() {
     let (url, _seen) = fake_upstream(echo_split);
     let p = start(&url, "chunk");
     let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
-    s.write_all(b"POST /anthropic/v1/messages HTTP/1.1\r\nhost: x\r\ntransfer-encoding: chunked\r\n\r\n1\r\nA\r\nffffffffffffffff\r\n").unwrap();
+    s.write_all(
+        b"POST /anthropic/v1/messages HTTP/1.1\r\ntransfer-encoding: chunked\r\n\r\n1\r\nA\r\nffffffffffffffff\r\n",
+    )
+    .unwrap();
     let mut sink = Vec::new();
     s.read_to_end(&mut sink).ok();
+    let (status, _) = post(p.port, "/anthropic/v1/messages", &[("content-type", "application/json")], b"{}");
+    assert_eq!(status, 200, "parda still answers");
+}
+
+#[test]
+fn web_pages_cannot_use_parda() {
+    let (url, seen) = fake_upstream(echo_split);
+    let p = start(&url, "web");
+    let json = ("content-type", "text/plain");
+    let rebinding = post(p.port, "/anthropic/v1/messages", &[json, ("host", "evil.example:7390")], b"{}");
+    assert_eq!(rebinding.0, 403, "DNS rebinding: a foreign Host is refused");
+    let page = post(p.port, "/anthropic/v1/messages", &[json, ("origin", "http://evil.example")], b"{}");
+    assert_eq!(page.0, 403, "a request from a web page is refused");
+    let fetch = post(p.port, "/anthropic/v1/messages", &[json, ("sec-fetch-site", "cross-site")], b"{}");
+    assert_eq!(fetch.0, 403);
+    assert!(seen.recv_timeout(Duration::from_millis(300)).is_err(), "nothing may reach the provider");
+    let local = post(p.port, "/anthropic/v1/messages", &[("host", "localhost:0")], b"{}");
+    assert_eq!(local.0, 403, "the right name with the wrong port is refused too");
+}
+
+#[test]
+fn an_endless_line_drops_one_connection_not_the_proxy() {
+    let (url, _seen) = fake_upstream(echo_split);
+    let p = start(&url, "line");
+    let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+    let mut huge = b"POST /anthropic/".to_vec();
+    huge.resize(200 << 10, b'a');
+    s.write_all(&huge).ok();
+    let mut sink = Vec::new();
+    s.read_to_end(&mut sink).ok();
+    assert!(String::from_utf8_lossy(&sink).contains("400"), "refused, not buffered forever");
     let (status, _) = post(p.port, "/anthropic/v1/messages", &[("content-type", "application/json")], b"{}");
     assert_eq!(status, 200, "parda still answers");
 }
