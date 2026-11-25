@@ -133,8 +133,10 @@ impl<'a> SseRestorer<'a> {
             return;
         };
 
+        // Gemini streams each chunk as a whole response (wrapped in `response` for Gemini CLI's Google sign-in).
         let streaming = v.get("type").and_then(Value::as_str).is_some_and(|t| t.contains("delta"))
-            || v.get("object").and_then(Value::as_str) == Some("chat.completion.chunk");
+            || v.get("object").and_then(Value::as_str) == Some("chat.completion.chunk")
+            || v.get("candidates").or_else(|| v.pointer("/response/candidates")).is_some();
         let mut here = Vec::new();
         if streaming {
             body::visit(&mut v, &mut |_, leaf| {
@@ -327,6 +329,38 @@ mod tests {
         };
         assert_eq!(call("fc_0"), "{\"a\": \"Ram Bahadur Thapa\"}");
         assert_eq!(call("fc_1"), "{\"b\":1");
+    }
+
+    #[test]
+    fn gemini_split_token_and_thoughts_kept_apart() {
+        let (v, tok) = setup();
+        let (a, b) = tok.split_at(6);
+        let ev = |parts: Value| {
+            let r = serde_json::json!({"candidates": [{"content": {"role": "model", "parts": parts}, "index": 0}]});
+            format!("data: {}\r\n\r\n", serde_json::json!({"response": r, "traceId": "t1"}))
+        };
+        let mut r = SseRestorer::new(&v);
+        let mut out = r.feed(ev(serde_json::json!([{"text": "thinking [", "thought": true}])).as_bytes());
+        out.extend(r.feed(ev(serde_json::json!([{"text": format!("Hello {a}")}])).as_bytes()));
+        out.extend(r.feed(ev(serde_json::json!([{"text": format!("{b}!")}])).as_bytes()));
+        let last = serde_json::json!({"response": {"candidates": [{"content": {"role": "model", "parts": [{"text": ""}]},
+            "finishReason": "STOP", "index": 0}]}});
+        out.extend(r.feed(format!("data: {last}\r\n\r\n").as_bytes()));
+        out.extend(r.finish());
+        let out = String::from_utf8(out).unwrap();
+        let mut answer = String::new();
+        let mut thought = String::new();
+        for e in out.split("\r\n\r\n").filter_map(|e| e.strip_prefix("data: ")) {
+            let v: Value = serde_json::from_str(e).unwrap();
+            for p in v["response"]["candidates"][0]["content"]["parts"].as_array().unwrap() {
+                let t = p["text"].as_str().unwrap_or("");
+                if p["thought"] == true { thought += t } else { answer += t }
+            }
+        }
+        assert_eq!(answer, "Hello Ram Bahadur Thapa!");
+        assert_eq!(thought, "thinking [");
+        assert!(out.find("thinking").unwrap() < out.find("Hello").unwrap(), "order kept");
+        assert_eq!(r.restored, 1);
     }
 
     #[test]

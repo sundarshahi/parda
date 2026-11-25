@@ -186,9 +186,16 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
         return error(out, 415, "parda can't scan a compressed request body, so it wasn't sent");
     }
 
-    // Query strings are forwarded as they are, so they must hold nothing parda would mask.
+    let api = match route.prefix.as_str() {
+        "/anthropic" => body::Api::Anthropic,
+        p if p.starts_with("/gemini") => body::Api::Gemini,
+        _ => body::Api::OpenAi,
+    };
+    // Query strings are forwarded as they are, so they must hold nothing parda would mask. Gemini may
+    // carry the user's own API key as `key=`; it goes to the provider it belongs to, like a header.
     if let Some((_, query)) = req.target.split_once('?') {
-        if !crate::detect::scan(query).is_empty() {
+        let scanned = query.split('&').filter(|p| !(api == body::Api::Gemini && p.starts_with("key=")));
+        if scanned.into_iter().any(|p| !crate::detect::scan(p).is_empty()) {
             return error(out, 400, "parda found sensitive data in the URL and didn't send the request");
         }
     }
@@ -198,7 +205,7 @@ fn handle(state: &State, req: &Request, out: &mut TcpStream) -> io::Result<()> {
     let body = if req.body.is_empty() {
         Vec::new()
     } else {
-        match body::mask_request(&state.vault, &req.body, &mut counts, route.prefix == "/anthropic") {
+        match body::mask_request(&state.vault, &req.body, &mut counts, api) {
             Ok(b) => b,
             Err(e) => return error(out, 415, &format!("parda only forwards JSON it can scan: {e}")),
         }

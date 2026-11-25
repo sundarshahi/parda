@@ -53,7 +53,7 @@ parda: masked 1 EMAIL, 1 PERSON, 1 SECRET</code></pre>
 <thead><tr><th>Where</th><th>What</th></tr></thead>
 <tbody>
 <tr><td><code>~/.parda/</code></td><td>The program, your private key (<code>key</code>, readable only by you), where each route goes (<code>upstreams.json</code>) and the evidence log.</td></tr>
-<tr><td><code>~/.zshenv</code>, <code>~/.zshrc</code>, <code>~/.bashrc</code>, <code>~/.bash_profile</code>, fish <code>conf.d</code></td><td>A marked block that sets <code>ANTHROPIC_BASE_URL</code>, <code>OPENAI_BASE_URL</code>, <code>OPENAI_API_BASE</code> and <code>ANTHROPIC_API_BASE</code> to parda.</td></tr>
+<tr><td><code>~/.zshenv</code>, <code>~/.zshrc</code>, <code>~/.bashrc</code>, <code>~/.bash_profile</code>, fish <code>conf.d</code></td><td>A marked block that sets <code>ANTHROPIC_BASE_URL</code>, <code>OPENAI_BASE_URL</code>, <code>OPENAI_API_BASE</code>, <code>ANTHROPIC_API_BASE</code>, <code>GOOGLE_GEMINI_BASE_URL</code> and <code>CODE_ASSIST_ENDPOINT</code> to parda, and puts <code>~/.parda/bin</code> on your <code>PATH</code>.</td></tr>
 <tr><td><code>~/.claude/settings.json</code></td><td><code>env.ANTHROPIC_BASE_URL</code>, because Claude Code's own settings win over the shell. The old value is saved and becomes parda's upstream.</td></tr>
 <tr><td><code>~/.codex/config.toml</code></td><td>A marked <code>openai_base_url</code> line at the top. An existing one is saved and becomes the upstream.</td></tr>
 <tr><td>Login service</td><td>A LaunchAgent (macOS) or systemd user service (Linux) that starts parda at login and restarts it if it stops.</td></tr>

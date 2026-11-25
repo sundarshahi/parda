@@ -159,7 +159,15 @@ Works through a base URL: Claude Code (CLI and IDE extensions; tested end to end
 file; ChatGPT sign-in is recognised by its `chatgpt-account-id` header and sent to ChatGPT's backend —
 untested), Aider, anything using the Anthropic or OpenAI SDKs that honours `ANTHROPIC_BASE_URL` /
 `OPENAI_BASE_URL`.
-Not covered: Cursor, Copilot inline completions, Gemini CLI with Google sign-in, desktop chat apps.
+Gemini CLI: `GOOGLE_GEMINI_BASE_URL` (API key, also read by Google's Gen AI SDKs) → `/gemini`, and
+`CODE_ASSIST_ENDPOINT` (sign-in with Google; requests wrapped in `request`, answers in `response`) →
+`/gemini-code`. Media in `inlineData`, `thoughtSignature` (signed) are never touched; `functionCall.args`
+and `functionResponse.response` are scanned whatever their keys; thought summaries stream on their own
+path so their held characters never join the answer. A Gemini API key in the URL (`?key=`) is allowed:
+it goes to the provider it belongs to, like a header.
+Copilot CLI and VS Code chat with the user's own key: documented two-line setup, not automatic (it
+changes who the user pays).
+Not covered: Cursor, Copilot with GitHub's models and inline completions, desktop chat apps.
 
 ## Weight budget (checked in CI)
 

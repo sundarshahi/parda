@@ -48,8 +48,14 @@ fn install_routes_everything_and_uninstall_restores_every_file() {
     assert!(said.contains("Anthropic requests go on to http://127.0.0.1:8787"), "{said}");
     assert!(said.contains("OpenAI requests go on to https://api.openai.com/v1"), "{said}");
 
+    assert!(
+        said.contains("Gemini CLI (Google sign-in) requests go on to https://cloudcode-pa.googleapis.com"),
+        "{said}"
+    );
+
     let up: Value = serde_json::from_str(&fs::read_to_string(home.join(".parda/upstreams.json")).unwrap()).unwrap();
     assert_eq!(up["anthropic"], "http://127.0.0.1:8787");
+    assert_eq!(up["gemini"], "https://generativelanguage.googleapis.com");
     let settings: Value =
         serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap()).unwrap();
     assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:7390/anthropic");
@@ -60,11 +66,14 @@ fn install_routes_everything_and_uninstall_restores_every_file() {
     );
     let zshrc = fs::read_to_string(home.join(".zshrc")).unwrap();
     assert!(zshrc.find("other proxy").unwrap() < zshrc.find(">>> parda >>>").unwrap(), "parda's block runs last");
-    assert!(
-        fs::read_to_string(home.join(".parda/env.sh"))
-            .unwrap()
-            .contains("ANTHROPIC_BASE_URL=\"http://127.0.0.1:7390/anthropic\"")
-    );
+    let env_sh = fs::read_to_string(home.join(".parda/env.sh")).unwrap();
+    for line in [
+        "ANTHROPIC_BASE_URL=\"http://127.0.0.1:7390/anthropic\"",
+        "GOOGLE_GEMINI_BASE_URL=\"http://127.0.0.1:7390/gemini\"",
+        "CODE_ASSIST_ENDPOINT=\"http://127.0.0.1:7390/gemini-code\"",
+    ] {
+        assert!(env_sh.contains(line), "{line} missing from env.sh:\n{env_sh}");
+    }
     let key = fs::metadata(home.join(".parda/key")).unwrap();
     assert_eq!(std::os::unix::fs::PermissionsExt::mode(&key.permissions()) & 0o777, 0o600);
 

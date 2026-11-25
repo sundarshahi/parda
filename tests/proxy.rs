@@ -25,8 +25,11 @@ impl Drop for Parda {
 fn start(upstream: &str, name: &str) -> Parda {
     let home = std::env::temp_dir().join(format!("parda-it-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    std::fs::write(home.join("upstreams.json"), json!({"anthropic": upstream, "openai": upstream}).to_string())
-        .unwrap();
+    std::fs::write(
+        home.join("upstreams.json"),
+        json!({"anthropic": upstream, "openai": upstream, "gemini": upstream, "gemini-code": upstream}).to_string(),
+    )
+    .unwrap();
     // Port 0: parda picks a free port and says which, so parallel tests never collide.
     let mut child = Command::new(env!("CARGO_BIN_EXE_parda"))
         .arg("run")
@@ -107,6 +110,19 @@ fn echo_split(body: &str) -> (String, String) {
     ("text/event-stream".into(), sse)
 }
 
+/// The same, as Gemini CLI signed in with Google receives it: whole responses wrapped in `response`.
+fn echo_split_gemini(body: &str) -> (String, String) {
+    let mut sse = String::new();
+    for t in tokens(body) {
+        let (a, b) = t.split_at(t.len() / 2);
+        for piece in [format!(" <{a}"), format!("{b}>")] {
+            let ev = json!({"response": {"candidates": [{"content": {"role": "model", "parts": [{"text": piece}]}, "index": 0}]}});
+            sse += &format!("data: {ev}\r\n\r\n");
+        }
+    }
+    ("text/event-stream".into(), sse)
+}
+
 fn post(port: u16, path: &str, headers: &[(&str, &str)], body: &[u8]) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     let mut req = format!("POST {path} HTTP/1.1\r\nhost: x\r\nconnection: close\r\ncontent-length: {}\r\n", body.len());
@@ -173,6 +189,44 @@ fn provider_sees_stand_ins_client_sees_real_values() {
     for real in ["Ram", "ram@example.com", SECRET] {
         assert!(!log.contains(real), "the log must never hold values");
     }
+}
+
+#[test]
+fn gemini_cli_signed_in_with_google() {
+    let (url, seen) = fake_upstream(echo_split_gemini);
+    let p = start(&url, "gemini");
+    let request = json!({"model": "gemini-2.5-pro", "project": "demo-project", "request": {
+        "contents": [{"role": "user", "parts": [{"text": format!("Email Sita Sharma at sita@example.com, key {SECRET}")}]}],
+        "systemInstruction": {"role": "user", "parts": [{"text": "You are Gemini CLI."}]}}});
+    let (status, body) = post(
+        p.port,
+        "/gemini-code/v1internal:streamGenerateContent?alt=sse",
+        &[("content-type", "application/json")],
+        request.to_string().as_bytes(),
+    );
+    assert_eq!(status, 200);
+    let upstream_body = seen.recv_timeout(Duration::from_secs(5)).unwrap();
+    for real in ["Sita Sharma", "sita@example.com", SECRET] {
+        assert!(!upstream_body.contains(real), "{real} reached the provider: {upstream_body}");
+    }
+    let text: String = body
+        .split("\r\n\r\n")
+        .filter_map(|e| e.strip_prefix("data: "))
+        .filter_map(|d| serde_json::from_str::<Value>(d).ok())
+        .filter_map(|v| {
+            v.pointer("/response/candidates/0/content/parts/0/text").and_then(Value::as_str).map(str::to_string)
+        })
+        .collect();
+    assert_eq!(text, format!(" <Sita Sharma> <sita@example.com> <{SECRET}>"));
+
+    // With an API key, Gemini may put the user's own key in the URL: it goes on to Google like a header.
+    let (status, _) = post(
+        p.port,
+        "/gemini/v1beta/models/gemini-2.5-pro:generateContent?key=AIzaSyA1234567890abcdefghijklmnopqrstuv",
+        &[("content-type", "application/json")],
+        b"{}",
+    );
+    assert_eq!(status, 200);
 }
 
 #[test]

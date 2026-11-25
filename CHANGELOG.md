@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Gemini CLI and apps using Google's Gen AI SDK: `install` sets `GOOGLE_GEMINI_BASE_URL` and
+  `CODE_ASSIST_ENDPOINT`; Gemini requests and streamed answers are masked and restored (media,
+  signatures and thought summaries handled).
+- GitHub Copilot CLI and VS Code chat with your own Anthropic or OpenAI key: documented setup.
+
 ## 0.1.0 — 2026-11-22
 
 First release.
