@@ -44,6 +44,17 @@ Measure the rules on a big file:
 PARDA_BENCH_FILE=some-large-file.txt cargo test --release bench -- --ignored --nocapture
 ```
 
+Fuzz the masking and the stream restoring (nightly Rust and `cargo install cargo-fuzz`):
+
+```sh
+cargo +nightly fuzz list
+cargo +nightly fuzz run request fuzz/corpus/request fuzz/seeds/request -- -dict=fuzz/parda.dict -max_total_time=60
+```
+
+The targets in [`fuzz/fuzz_targets`](fuzz/fuzz_targets) check properties, not only crashes: a found
+value is gone from what leaves, restoring gives the request back, and a stream restores the same
+however it is cut into chunks. CI runs each for a minute on pull requests and ten on Mondays.
+
 ## Where things are
 
 | File | What it does |

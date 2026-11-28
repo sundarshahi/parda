@@ -1,0 +1,6 @@
+key:
+-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA
+abc
+-----END RSA PRIVATE KEY-----
+curl -u admin:hunter2pass https://x Authorization: Bearer abcdefghijklmnopqrstuvwxyz.0123

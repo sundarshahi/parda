@@ -39,6 +39,8 @@ struct Tables {
     previous: HashMap<String, String>,
     /// Every real value in the tables, to find it again anywhere (built when first needed).
     known: Option<Arc<(AhoCorasick, Vec<Kind>)>>,
+    /// How many values were ever added: it moves exactly when there is something new to look for.
+    learned: u64,
 }
 
 fn kind_of(token: &str) -> Kind {
@@ -110,6 +112,7 @@ impl Vault {
                 None => {
                     map.now.insert(t.clone(), value.to_string());
                     map.known = None;
+                    map.learned += 1;
                     return t;
                 }
             }
@@ -146,9 +149,18 @@ impl Vault {
     /// Replaces every find, and every value masked before, with its stand-in. `None` when there was
     /// nothing to mask.
     pub fn mask(&self, text: &str, counts: &mut Counts) -> Option<String> {
-        let finds = detect::scan_with(text, self.known_finds(text));
+        let mut finds = detect::scan_with(text, self.known_finds(text));
         if finds.is_empty() {
             return None;
+        }
+        // A value found by what stands next to it (`DB_PASSWORD=…`) is often repeated bare in the
+        // same text (`mysql -p…`): learn this text's values, then look for them once more.
+        let before = self.learned();
+        for f in &finds {
+            self.stand_in(f.kind, &text[f.start..f.end]);
+        }
+        if self.learned() != before {
+            finds = detect::scan_with(text, self.known_finds(text));
         }
         let mut out = String::with_capacity(text.len());
         let mut at = 0;
@@ -160,6 +172,11 @@ impl Vault {
         }
         out.push_str(&text[at..]);
         Some(out)
+    }
+
+    /// Moves whenever the vault holds a value it did not hold before.
+    pub fn learned(&self) -> u64 {
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).learned
     }
 
     /// The stand-in for a whole value already known to be `kind` (a JSON field named like a secret).
@@ -257,6 +274,18 @@ mod tests {
         assert_eq!(again, format!("Your password is {token}; mysql -u app -p{token}"));
         assert_eq!(c.get("SECRET"), Some(&2));
         assert_eq!(v.mask("nothing known here", &mut Counts::new()), None);
+    }
+
+    #[test]
+    fn a_value_found_by_its_name_is_masked_everywhere_in_the_same_text() {
+        for text in
+            ["DB_PASSWORD=hunter22xyz\nmysql -u app -phunter22xyz", "mysql -phunter33xyz\nDB_PASSWORD=hunter33xyz"]
+        {
+            let mut c = Counts::new();
+            let m = Vault::new([6; 32]).mask(text, &mut c).unwrap();
+            assert!(!m.contains("hunter"), "the copy without its name went out: {m}");
+            assert_eq!(c.get("SECRET"), Some(&2));
+        }
     }
 
     #[test]

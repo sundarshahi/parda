@@ -210,22 +210,31 @@ fn add_note(v: &mut Value, api: Api) {
 pub fn mask_request(vault: &Vault, body: &[u8], counts: &mut Counts, api: Api, note: bool) -> Result<Vec<u8>, String> {
     let mut v: Value = serde_json::from_slice(body).map_err(|e| format!("the request body isn't JSON ({e})"))?;
     let mut changed = false;
-    visit(&mut v, &mut |s, leaf| {
-        let masked = if data_url(s).is_some() {
-            mask_data_url(vault, s, counts)
-        } else if leaf.key == "file_data" {
-            None // base64 without a data: prefix: not text
-        } else if detect::secret_setting(leaf.key, s) && !vault::token_re().is_match(s) {
-            // `{"DB_PASSWORD": "…"}`: the name is the key, so no rule sees name and value together
-            Some(vault.mask_as(Kind::Secret, s, counts))
-        } else {
-            vault.mask(s, counts)
-        };
-        if let Some(m) = masked {
-            *s = m;
-            changed = true;
-        }
-    });
+    let mut pass = |v: &mut Value, counts: &mut Counts| {
+        visit(v, &mut |s, leaf| {
+            let masked = if data_url(s).is_some() {
+                mask_data_url(vault, s, counts)
+            } else if leaf.key == "file_data" {
+                None // base64 without a data: prefix: not text
+            } else if detect::secret_setting(leaf.key, s) && !vault::token_re().is_match(s) {
+                // `{"DB_PASSWORD": "…"}`: the name is the key, so no rule sees name and value together
+                Some(vault.mask_as(Kind::Secret, s, counts))
+            } else {
+                vault.mask(s, counts)
+            };
+            if let Some(m) = masked {
+                *s = m;
+                changed = true;
+            }
+        });
+    };
+    let before = vault.learned();
+    pass(&mut v, counts);
+    // A value this request taught the vault may sit bare in a message that was scanned before the
+    // one that named it: go over the body once more.
+    if vault.learned() != before {
+        pass(&mut v, counts);
+    }
     if changed && note {
         add_note(&mut v, api);
     }
@@ -308,6 +317,18 @@ mod tests {
         )
         .unwrap();
         assert!(!String::from_utf8(out).unwrap().contains("AKIA"));
+    }
+
+    #[test]
+    fn a_value_named_later_in_the_request_is_masked_in_earlier_messages_too() {
+        let body = json!({"messages": [
+            {"role": "user", "content": "run mysql -u app -phunter77xyz"},
+            {"role": "user", "content": [{"type": "tool_result", "content": "DB_PASSWORD=hunter77xyz"}]}
+        ]});
+        let out = mask_request(&vault(), &serde_json::to_vec(&body).unwrap(), &mut Counts::new(), Api::Anthropic, true)
+            .unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(!out.contains("hunter77xyz"), "the earlier copy went out: {out}");
     }
 
     #[test]

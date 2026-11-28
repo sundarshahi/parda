@@ -1,0 +1,2 @@
+DB_PASSWORD=hunter22xyz
+mysql -u app -phunter22xyz

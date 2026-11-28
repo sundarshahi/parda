@@ -10,7 +10,7 @@ homepage = "https://sundarshahi.github.io/parda/"
 readme = "README.md"
 keywords = ["privacy", "pii", "redaction", "llm", "proxy"]
 categories = ["command-line-utilities", "development-tools", "network-programming"]
-exclude = ["/.github", "/docs"]
+exclude = ["/.github", "/docs", "/fuzz"]
 
 [dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"] }

@@ -1,0 +1,1 @@
+{"request":{"contents":[{"role":"user","parts":[{"text":"I am Sita Sharma"},{"inlineData":{"mimeType":"image/png","data":"QUJD"}}]},{"role":"model","parts":[{"functionCall":{"id":"c1","name":"run","args":{"command":"echo AKIAIOSFODNN7EXAMPLE"}},"thoughtSignature":"sig"}]}],"systemInstruction":{"parts":[{"text":"You are a CLI."}]}}}

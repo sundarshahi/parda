@@ -1,0 +1,41 @@
+name: fuzz
+
+# One minute per target on pull requests that touch the code; ten minutes each on Monday mornings.
+on:
+  pull_request:
+    paths: ["src/**", "data/**", "fuzz/**", "Cargo.toml", "Cargo.lock"]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '60' || '600' }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install nightly --profile minimal
+      - run: cargo install cargo-fuzz --locked
+      - name: Run every target
+        run: |
+          set -eu
+          for target in $(cargo +nightly fuzz list); do
+            mkdir -p "fuzz/corpus/$target"
+            set -- "fuzz/corpus/$target"
+            if [ -d "fuzz/seeds/$target" ]; then set -- "$@" "fuzz/seeds/$target"; fi
+            echo "::group::$target"
+            cargo +nightly fuzz run "$target" "$@" -- -max_len=4096 -timeout=5 -dict=fuzz/parda.dict \
+              -max_total_time="$SECONDS_PER_TARGET" -print_final_stats=1
+            echo "::endgroup::"
+          done
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: failing-inputs
+          path: fuzz/artifacts
+          retention-days: 14

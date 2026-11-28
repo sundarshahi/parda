@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Fixed (found by fuzzing):
+
+- A long run of numbers (a pasted table, a column of ids) no longer stalls the proxy: the card check
+  took time with the cube of the run's length, 1.7 s for 4 KB of digits and eight times that for 8 KB.
+- A value found by the name beside it (`DB_PASSWORD=…`) is now masked everywhere else it appears in
+  the same request, including bare (`mysql -p…`) and in earlier messages.
+
+Fuzz targets for masking, requests and streamed answers run in CI.
+
 ## 0.2.0 — 2026-11-25
 
 - Gemini CLI and apps using Google's Gen AI SDK: `install` sets `GOOGLE_GEMINI_BASE_URL` and
