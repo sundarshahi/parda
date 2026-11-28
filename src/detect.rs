@@ -260,7 +260,8 @@ fn card_finds(text: &str, out: &mut Vec<Find>) {
         let mut i = 0;
         while i < groups.len() {
             let mut hit = None;
-            for j in (i..groups.len()).rev() {
+            // A card has at most 19 digits, so at most 19 groups; looking further cost the cube of the run.
+            for j in (i..groups.len().min(i + 19)).rev() {
                 let d: String = groups[i..=j].iter().map(|&(a, b)| &text[a..b]).collect();
                 if d.len() > 19 {
                     continue;
@@ -494,6 +495,17 @@ mod tests {
         none("order 1234567812345670 shipped"); // Luhn-valid, but no card brand starts with 1
         none("id 9012345678901234");
         none("build 1.2.3.4.5 from 10.0.0.1");
+    }
+
+    #[test]
+    fn a_long_table_of_numbers_is_scanned_quickly() {
+        // 8 KB of single digits took over ten seconds before the card check was bounded; 40 KB, half an hour.
+        let table = (0..4_000).map(|i| (i % 10).to_string()).collect::<Vec<_>>().join(" ");
+        let t = std::time::Instant::now();
+        scan(&table);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "took {:?}", t.elapsed());
+        // a card at the end of a long run is still found
+        one(&format!("{} 4111 1111 1111 1111", &table[..2000]), Kind::Card, "4111 1111 1111 1111");
     }
 
     #[test]
