@@ -1,0 +1,4 @@
+data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"thinking [","thought":true}]},"index":0}]}}
+
+data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Hi !"}]},"index":0}]}}
+

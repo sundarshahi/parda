@@ -1,0 +1,55 @@
+[package]
+name = "parda-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace: nightly-only, never part of parda's build, lint or release.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+# Same versions and features as parda's own Cargo.toml: the modules are compiled from `../src`.
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+aho-corasick = "1"
+base64 = "0.23"
+blake3 = { version = "1", default-features = false, features = ["pure", "std"] }
+
+[[bin]]
+name = "mask"
+path = "fuzz_targets/mask.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "no_survivors"
+path = "fuzz_targets/no_survivors.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "request"
+path = "fuzz_targets/request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sse_chunks"
+path = "fuzz_targets/sse_chunks.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sse_stream"
+path = "fuzz_targets/sse_stream.rs"
+test = false
+doc = false
+bench = false
